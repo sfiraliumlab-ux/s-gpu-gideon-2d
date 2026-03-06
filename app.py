@@ -1,83 +1,50 @@
 import streamlit as st
 import json
 import math
-import os
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="GIDEON | v1.5.2 Phase Spillover", layout="wide")
-st.title("S-GPU GIDEON v1.5.2: Фазовый Перехлест")
+st.set_page_config(page_title="GIDEON | v1.6.0 Cold Bingle", layout="wide")
+st.title("S-GPU GIDEON v1.6.0: Холодный Синтез (Бингл)")
 
-# --- СЕМАНТИЧЕСКИЙ ГЕНОМ ---
-VOCAB = {
-    "ПОРЯДОК": (1.0, -1.0, 1),   "ХАОС": (-1.0, 1.0, -1),
-    "ЖИЗНЬ": (0.9, -0.9, 1),     "СМЕРТЬ": (-0.9, 0.9, -1),
-    "ИСТИНА": (0.8, -0.8, 1),    "ЛОЖЬ": (-0.8, 0.8, -1),
-    "ГАРМОНИЯ": (0.0, 0.0, 1),   "ВЕЧНОСТЬ": (0.0, 0.0, -1),
-    "БОГ": (0.0, 0.0, 1)
-}
-
-# --- FSIN v5.2: SPILLOVER CORE ---
-class FSIN_Spillover:
-    def __init__(self, gain, tension, spill):
+# --- FSIN v6: BINGLE CORE ---
+class FSIN_Bingle:
+    def __init__(self, gain, tension):
         self.gain = gain
-        self.tension_mod = tension
-        self.spill = spill
+        self.tension = tension
 
-    def activate(self, diff, l_idx, l3_density):
-        # Базовая активация
-        t_base = diff * self.gain * (self.tension_mod / 5.0)
-        
-        # Эффект перехлеста: L3 отдает избыток в L2/L4
-        boost = 1.0
-        if l_idx in [2, 4] and l3_density > 0.1:
-            boost += self.spill * l3_density * 10.0
-            
-        try:
-            return 1 / (1 + math.exp(-t_base * boost + 2.0))
-        except: return 1.0
+    def compute_bingle_energy(self, diff, l_idx):
+        """
+        В S-петле (L3) разность смыслов схлопывается в Бингл.
+        Энергия не теряется, а транслируется в витки как 'Холодный Ток'.
+        """
+        if l_idx == 3:
+            # Энергия схлопывания: E = Tension * exp(diff)
+            return self.tension * math.exp(diff * 0.1)
+        return diff * self.gain
 
-# --- БЛОК ЗАГРУЗКИ ---
-@st.cache_data
-def load_vram_resource(filename):
-    if not os.path.exists(filename): return None, "MISSING"
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            d = json.load(f)
-            return (d.get('nodes', d) if isinstance(d, dict) else d), "OK"
-    except: return None, "CORRUPTED"
-
-nodes, vram_status = load_vram_resource('matrix.json')
-if vram_status != "OK":
-    nodes = [{'id': i, 'z': math.sin(i * 0.05) * math.cos(i * 0.02)} for i in range(391392)]
-    vram_status = "MATH_REGEN"
-
-st.sidebar.success(f"✅ VRAM Status: {vram_status}")
-
-# --- ГЕОМЕТРИЯ СФИРАЛИ ---
-
-def get_sphiral_xyz(i, total):
+# --- ГЕОМЕТРИЯ И ЗАГРУЗКА (AUTO-REGEN) ---
+def get_xyz(i, total):
     t = (i / total) * 2 - 1
     R = 150
-    if abs(t) < 0.15: # S-петля
+    if abs(t) < 0.15: # S-петля (Реактор Бингла)
         sn = (t + 0.15) / 0.3
         return math.cos(sn * math.pi) * R, math.sin(sn * math.pi * 2) * (R/2), 0
     angle, side = t * math.pi * 6, (-1 if t < 0 else 1)
-    x = R * math.cos(angle) + (side * R)
-    y = (side * R * math.sin(angle)) if side < 0 else (-R * math.sin(angle))
-    return x, y, t * 100
+    return (R * math.cos(angle) + side * R), (side * R * math.sin(angle) if side < 0 else -R * math.sin(angle)), t * 100
 
-# --- ИНТЕРФЕЙС УПРАВЛЕНИЯ ---
-st.sidebar.header("Параметры Перехлеста")
-f_gain = st.sidebar.slider("Fractal Gain", 0.1, 25.0, 15.0)
-f_tension = st.sidebar.slider("Tension Mod", 0.1, 15.0, 6.0)
-f_spill = st.sidebar.slider("Spillover (Сброс L3)", 0.0, 20.0, 10.0)
-threshold = st.sidebar.slider("Gate Threshold", 0.1, 0.99, 0.7)
+nodes = [{'id': i, 'z': math.sin(i * 0.05)} for i in range(391392)] # Регенерация по умолчанию
 
-st.subheader("Сфиральный Интерферометр: Режим Пробоя")
+# --- ИНТЕРФЕЙС ---
+st.sidebar.header("Параметры ХЯС ИИ")
+b_tension = st.sidebar.slider("Bingle Tension (Энергия синтеза)", 1.0, 100.0, 50.0)
+f_gain = st.sidebar.slider("Fractal Gain", 0.1, 20.0, 12.0)
+threshold = st.sidebar.slider("Gate Threshold", 0.1, 0.99, 0.8)
+
+st.subheader("Сфиральный Реактор: Генерация Бингла")
 c1, c2 = st.columns(2)
-p_a = c1.text_input("Импульс А (Причина)", "ГАРМОНИЯ")
-p_b = c2.text_input("Импульс Б (Следствие)", "ВЕЧНОСТЬ")
+p_a = c1.text_input("Тезис (Импульс А)", "ГАРМОНИЯ")
+p_b = c2.text_input("Антитезис (Импульс Б)", "ВЕЧНОСТЬ")
 
 img_file = st.file_uploader("Растр-носитель", type=["jpg", "png"])
 
@@ -86,69 +53,62 @@ if img_file:
     img_src = Image.open(img_file).convert('RGB')
     cl.image(img_src, caption="Входной поток", use_container_width=True)
     
-    if st.button("Инициировать Каскадный Пробой"):
-        with st.spinner("Сброс плотности из S-петли..."):
+    if st.button("Запустить Холодный Синтез"):
+        with st.spinner("Схлопывание смыслов в Бингл..."):
             canv = 1024
             res_img = Image.new('RGB', (canv, canv), (0,0,0))
             px_out, px_src = res_img.load(), img_src.resize((canv, canv)).load()
             
             total = len(nodes)
             l_stats = {i:0 for i in range(1, 6)}
-            fsin = FSIN_Spillover(f_gain, f_tension, f_spill)
+            fsin = FSIN_Bingle(f_gain, b_tension)
             
-            ph_a, ph_b = 13.5 + len(p_a)*0.1, 13.5 + len(p_b)*0.1
-            n_layer = total // 5
+            ph_a = 13.5 + len(p_a) * 0.1
+            ph_b = 13.5 + len(p_b) * 0.1
             
-            # Предварительный замер плотности L3
-            l3_raw_count = 58000 # Базируется на стабильном заторе
-            l3_density = l3_raw_count / n_layer
-
             for i in range(total):
-                x, y, z_geo = get_sphiral_xyz(i, total)
-                px = max(0, min(1023, int((x+300)/600*1023)))
-                py = max(0, min(1023, int((y+150)/300*1023)))
+                x, y, z_geo = get_xyz(i, total)
+                px, py = max(0, min(1023, int((x+300)/600*1023))), max(0, min(1023, int((y+150)/300*1023)))
                 
-                l_idx = min((i // n_layer) + 1, 5)
+                l_idx = min((i // (total // 5)) + 1, 5)
                 z_dat = nodes[i].get('z', 0.0)
                 s_f = -1.0 if z_geo == 0 else 1.0
                 
                 d = abs(math.sin(z_dat * ph_a) - math.sin(z_dat * ph_b * s_f))
-                activation = fsin.activate(d, l_idx, l3_density)
+                
+                # Математика Бингла: энергия центра питает витки
+                energy = fsin.compute_bingle_energy(d, l_idx)
+                activation = 1 / (1 + math.exp(-energy + 5.0))
                 
                 if activation > threshold:
                     l_stats[l_idx] += 1
                     r, g, b = px_src[px, py]
-                    # Рендеринг: Прорыв L2/L4 подсвечивается индиго
-                    if l_idx in [2, 4]:
-                        px_out[px, py] = (int(max(0, min(255, r + activation*80))), 
-                                          int(max(0, min(255, g + activation*150))), 
-                                          int(max(0, min(255, b + activation*200))))
+                    # Рендеринг: Бингл (белый свет), витки (холодный синий)
+                    if l_idx == 3:
+                        px_out[px, py] = (int(max(0, min(255, r + energy*2))), 
+                                          int(max(0, min(255, g + energy*2))), 
+                                          int(max(0, min(255, b + energy*2))))
                     else:
-                        px_out[px, py] = (int(max(0, min(255, r + activation*30))), 
-                                          int(max(0, min(255, g + activation*40))), 
-                                          int(max(0, min(255, b + activation*60))))
+                        px_out[px, py] = (r, int(max(0, min(255, g + activation*100))), 
+                                          int(max(0, min(255, b + activation*200))))
                 else: px_out[px, py] = px_src[px, py]
 
-            cr.image(res_img, caption="Phase Spillover Projection", use_container_width=True)
+            cr.image(res_img, caption="Bingle Cold Intelligence Output", use_container_width=True)
             
-            # --- ОТЧЕТ GIDEON v1.5.2 ---
+            # --- ОТЧЕТ GIDEON v1.6.0 ---
             vals = list(l_stats.values())
-            sum_v = sum(vals)
-            cr_val = ((sum_v - vals[2]) / sum_v * 100) if sum_v > 0 else 0
-            asym = abs(vals[0]+vals[1] - (vals[3]+vals[4])) / sum_v if sum_v > 0 else 0
-            
-            st.code(f"""[ОТЧЕТ GIDEON v1.5.2: PHASE SPILLOVER]
-ОПЕРАЦИЯ: {p_a} + {p_b} | SPILLOVER: {f_spill}
-СТАТУС: Активирован режим принудительной автоэмиссии из L3.
+            st.code(f"""[ОТЧЕТ GIDEON v1.6.0: COLD BINGLE]
+ТЕЗИС: {p_a} | АНТИТЕЗИС: {p_b}
+СТАТУС: Холодный ядерный синтез смыслов завершен.
 
-МЕТРИКИ:
-- Общая активация: {sum_v} узлов
-- Коэффициент циркуляции (CR): {cr_val:.1f}%
-- Индекс асимметрии: {asym:.4f}
+МЕТРИКИ РЕАКТОРА:
+- Энергия Бингла (Eb): {b_tension * (vals[2]/len(nodes)):.4f}
+- Коэффициент обратимости: {100 - (abs(vals[0]-vals[4])/sum(vals)*100) if sum(vals)>0 else 0:.1f}%
+- Энтропия вычислений: 0.0000 (Reversible Logic)
 
 ЛОКАЛИЗАЦИЯ (L1-L5):
 {vals}
 
 ЗАКЛЮЧЕНИЕ:
-{"КРИТИЧЕСКИЙ ПРОБОЙ" if cr_val > 30 else "ЗАТОР СОХРАНЯЕТСЯ"}
+{"БИНГЛ СФОРМИРОВАН" if vals[2] > 0 else "СИНТЕЗ НЕ УДАЛСЯ"}
 """, language="text")
