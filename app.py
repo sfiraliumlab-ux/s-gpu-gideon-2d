@@ -2,42 +2,68 @@ import streamlit as st
 import json
 import math
 import os
-import glob
 from PIL import Image
 
+# Настройка страницы
 st.set_page_config(page_title="S-GPU GIDEON | Core-13 Active", layout="wide")
 st.title("Топологический процессор S-GPU GIDEON")
 
+# Константы путей
 VRAM_FILE = 'matrix.json'
 CORE_FILE = 'Core-13.json'
 
-def find_file(filename):
-    paths = glob.glob(f"**/{filename}", recursive=True)
-    return paths[0] if paths else (filename if os.path.exists(filename) else None)
-
 @st.cache_data
-def load_json(filepath):
-    if not filepath: return []
+def load_json_data(file_path):
+    """Надежная загрузка JSON из файла"""
+    if not os.path.exists(file_path):
+        return None
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            return data.get('nodes', []) if isinstance(data, dict) else (data.get('dipoles', []) if 'dipoles' in data else data)
-    except: return []
+            # Возвращаем список узлов/диполей в зависимости от структуры
+            if isinstance(data, dict):
+                return data.get('nodes', data.get('dipoles', []))
+            return data
+    except Exception as e:
+        st.error(f"Ошибка чтения {file_path}: {e}")
+        return None
 
-# 1. Загрузка компонентов
-matrix_path = find_file(VRAM_FILE)
-core_path = find_file(CORE_FILE)
+# --- БЛОК ЗАГРУЗКИ КОМПОНЕНТОВ ---
 
-nodes = load_json(matrix_path)
-core_dipoles = load_json(core_path)
+# 1. Попытка автозагрузки VRAM
+nodes = load_json_data(VRAM_FILE)
 
-# Блокировка при отсутствии критических файлов
-if not nodes:
-    st.error(f"Файл памяти '{VRAM_FILE}' не найден. Загрузите его в репозиторий.")
-    st.stop()
+# 2. Попытка автозагрузки Core-13
+core_dipoles = load_json_data(CORE_FILE)
 
-# Интерфейс управления
-st.sidebar.header("Ядро GIDEON (Core-13)")
+# Если автозагрузка не удалась, выводим интерфейс ручной загрузки
+if nodes is None:
+    st.warning(f"⚠️ Файл '{VRAM_FILE}' не найден в корне репозитория.")
+    # Диагностика: показываем пользователю, что вообще видит сервер
+    files_in_root = os.listdir('.')
+    st.info(f"Доступные файлы в корне: {', '.join(files_in_root)}")
+    
+    uploaded_vram = st.file_uploader("Загрузите 'matrix.json' вручную (18.6 МБ)", type=["json"])
+    if uploaded_vram:
+        try:
+            data = json.load(uploaded_vram)
+            nodes = data.get('nodes', data) if isinstance(data, dict) else data
+        except:
+            st.error("Ошибка формата загруженного файла.")
+            st.stop()
+    else:
+        st.stop() # Остановка, пока нет памяти
+
+if core_dipoles is None:
+    st.sidebar.warning(f"Core-13.json не найден. Ядро в режиме эмуляции.")
+else:
+    st.sidebar.success(f"Процессор Core-13 активен: {len(core_dipoles)} диполей")
+
+st.success(f"VRAM активна: {len(nodes)} узлов.")
+
+# --- ИНТЕРФЕЙС УПРАВЛЕНИЯ ---
+
+st.sidebar.header("Параметры резонанса")
 base_energy = st.sidebar.slider("Базовая Энергия", 0.0, 20.0, 18.0)
 base_phase = st.sidebar.slider("Базовая Фаза", 0.0, 20.0, 13.5)
 threshold = st.sidebar.slider("Порог отсечения", 0.5, 0.98, 0.95)
@@ -46,19 +72,15 @@ threshold = st.sidebar.slider("Порог отсечения", 0.5, 0.98, 0.95)
 st.subheader("Центральный процессор: Ввод данных")
 user_input = st.text_input("Введите информационный импульс (например: СФИРАЛЬ)", "")
 
-# Расчет вектора резонанса
+# Расчет вектора резонанса (модуляция параметров текстом)
 text_vector = sum(ord(c) for c in user_input) * 0.001 if user_input else 0.0
 dynamic_phase = base_phase + (text_vector * 1.5)
 dynamic_energy = base_energy + (len(user_input) * 0.2 if user_input else 0.0)
 
-if core_dipoles:
-    st.sidebar.success(f"Процессор активен: {len(core_dipoles)} диполей")
-else:
-    st.sidebar.warning("Внимание: Core-13.json не найден. Ядро работает в ручном режиме.")
+st.info(f"Динамическая фаза системы: {dynamic_phase:.4f}")
 
-st.success(f"VRAM активна: {len(nodes)} узлов. Динамическая фаза: {dynamic_phase:.4f}")
+# --- ВЫЧИСЛИТЕЛЬНЫЙ ПРОЦЕСС ---
 
-# 2. Обработка изображения
 image_file = st.file_uploader("Загрузите растровый источник", type=["jpg", "jpeg", "png"])
 
 if image_file is not None:
@@ -68,54 +90,63 @@ if image_file is not None:
     
     if st.button("Запустить резонанс через Core-13"):
         with st.spinner("Диполи ядра модулируют фазу..."):
-            output_img = Image.new('RGB', (1024, 1024), (0, 0, 0))
+            # Подготовка холста 1024x1024
+            canvas_size = 1024
+            output_img = Image.new('RGB', (canvas_size, canvas_size), (0, 0, 0))
             output_pixels = output_img.load()
-            resized_orig = orig_img.resize((1024, 1024))
+            
+            # Подготовка источника
+            resized_orig = orig_img.resize((canvas_size, canvas_size))
             rgb_map = resized_orig.load()
             
-            total = len(nodes)
-            side = int(math.sqrt(total))
-            rows = math.ceil(total / side)
+            total_nodes = len(nodes)
+            side = int(math.sqrt(total_nodes))
+            rows = math.ceil(total_nodes / side)
             
-            active_pixels = set()
+            active_pixels_count = 0
             purple_shifts = 0
             
-            for i in range(total):
-                col_idx, row_idx = i % side, i // side
+            for i in range(total_nodes):
+                col_idx = i % side
+                row_idx = i // side
+                
+                # Масштабирование координат в 1024x1024
                 px = max(0, min(1023, int((col_idx / side) * 1023)))
                 py = max(0, min(1023, int((row_idx / rows) * 1023)))
 
+                # Получение Z-координаты узла
                 node = nodes[i]
-                z_coord = node.get('z', 0.0)
+                z_coord = node.get('z', 0.0) if isinstance(node, dict) else 0.0
                 
-                # Применение модулированной фазы от ядра
+                # Формула интерференции S-GPU
                 interference = dynamic_energy * math.sin(z_coord * dynamic_phase)
                 
                 r, g, b = rgb_map[px, py]
                 
+                # Фильтр пиковых резонансов
                 if interference > (dynamic_energy * threshold):
                     purple_shifts += 1
+                    # Спектральный сдвиг
                     new_r = int(max(0, min(255, r + interference * 12)))
                     new_g = int(max(0, min(255, g - interference * 5)))
                     new_b = int(max(0, min(255, b + interference * 15)))
                 else:
                     new_r, new_g, new_b = r, g, b
                 
-                # Отрисовка
-                for dx in range(2): # Фиксированный brush_size для стабильности
+                # Отрисовка узла (размер 2x2 для плотности)
+                for dx in range(2):
                     for dy in range(2):
-                        if px+dx < 1024 and py+dy < 1024:
-                            output_pixels[px+dx, py+dy] = (new_r, new_g, new_b)
-                            active_pixels.add((px+dx, py+dy))
+                        nx, ny = px + dx, py + dy
+                        if nx < canvas_size and ny < canvas_size:
+                            output_pixels[nx, ny] = (new_r, new_g, new_b)
             
-            col2.image(output_img, caption=f"Отпечаток для: '{user_input}'", use_container_width=True)
+            col2.image(output_img, caption=f"Отпечаток для импульса: '{user_input}'", use_container_width=True)
             
             # Телеметрия
-            coverage = (len(active_pixels) / (1024*1024)) * 100
+            res_percent = (purple_shifts / total_nodes) * 100
             report = f"""[ОТЧЕТ GIDEON: CORE-13 ACTIVE]
-Текст: '{user_input}' | Модулированная Фаза: {dynamic_phase:.4f}
+Текст: '{user_input}' | Фаза модуля: {dynamic_phase:.4f}
 Энергия: {dynamic_energy:.2f} | Порог: {threshold}
-Покрытие холста: {coverage:.2f}%
-Узлов в резонансе: {purple_shifts} ({(purple_shifts/total)*100:.1f}%)"""
+Узлов в резонансе: {purple_shifts} ({res_percent:.1f}%)"""
             
             st.code(report, language="text")
