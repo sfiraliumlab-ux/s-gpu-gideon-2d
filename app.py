@@ -5,8 +5,8 @@ import os
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="GIDEON | v1.3.4 Torsion", layout="wide")
-st.title("S-GPU GIDEON v1.3.4: Торсионный Прорыв")
+st.set_page_config(page_title="GIDEON | v1.3.5 Diffusion", layout="wide")
+st.title("S-GPU GIDEON v1.3.5: Диффузия Сингулярности")
 
 # --- КОНСТАНТЫ LOGOS-3 ---
 VOCAB = {
@@ -17,23 +17,27 @@ VOCAB = {
     "БОГ": (0.0, 0.0, 1)
 }
 
-# --- FSIN ENGINE v3: TORSION DIFFUSION ---
+# --- FSIN ENGINE v3.1: DIFFUSION CORE ---
 class FSIN:
-    def __init__(self, gain, bias, torsion):
+    def __init__(self, gain, bias, torsion, diffusion):
         self.gain = gain
         self.bias = bias
         self.torsion = torsion
+        self.diffusion = diffusion
 
     def activate(self, diff, layer_idx):
-        # Если слой центральный (L3), добавляем торсионный импульс для пробоя
-        boost = self.torsion if layer_idx == 3 else 1.0
+        # Модуляция усиления в зависимости от слоя
+        # L3 - эпицентр, L2/L4 - зоны диффузии
+        layer_mod = 1.0
+        if layer_idx == 3: layer_mod = self.torsion
+        if layer_idx in [2, 4]: layer_mod = self.diffusion
+        
         try:
-            val = 1 / (1 + math.exp(- (diff * self.gain * boost) + self.bias))
-            return val
+            return 1 / (1 + math.exp(- (diff * self.gain * layer_mod) + self.bias))
         except:
             return 1.0
 
-# --- БЛОК ЗАГРУЗКИ (СТАБИЛЬНЫЙ) ---
+# --- БЛОК ЗАГРУЗКИ ---
 @st.cache_data
 def load_vram_resource(filename):
     if not os.path.exists(filename): return None, "MISSING"
@@ -44,40 +48,36 @@ def load_vram_resource(filename):
     except: return None, "CORRUPTED"
 
 nodes, vram_status = load_vram_resource('matrix.json')
-core_dipoles, core_status = load_vram_resource('Core-13.json')
-
 if vram_status != "OK":
     nodes = [{'id': i, 'z': math.sin(i * 0.05) * math.cos(i * 0.02)} for i in range(391392)]
-    st.warning(f"⚠️ VRAM регенерирована (status: {vram_status})")
-else:
-    st.success(f"✅ VRAM активна ({len(nodes)} узлов)")
+    vram_status = "MATH_REGEN"
 
-st.sidebar.success(f"✅ Core-13: {'Active' if core_status == 'OK' else 'Emulated'}")
+st.sidebar.success(f"✅ VRAM: {vram_status}")
 
-# --- ГЕОМЕТРИЯ СФИРАЛИ (3D XYZ) ---
+# --- ГЕОМЕТРИЯ СФИРАЛИ ---
+
 def get_sphiral_xyz(i, total):
     t = (i / total) * 2 - 1
     R = 150
-    if abs(t) < 0.15: # S-петля (Серединный Предел)
-        s_n = (t + 0.15) / 0.3
-        return math.cos(s_n * math.pi) * R, math.sin(s_n * math.pi * 2) * (R/2), 0
-    angle = t * math.pi * 6
-    side = -1 if t < 0 else 1
+    if abs(t) < 0.15: # S-петля
+        sn = (t + 0.15) / 0.3
+        return math.cos(sn * math.pi) * R, math.sin(sn * math.pi * 2) * (R/2), 0
+    angle, side = t * math.pi * 6, (-1 if t < 0 else 1)
     x = R * math.cos(angle) + (side * R)
     y = (side * R * math.sin(angle)) if side < 0 else (-R * math.sin(angle))
     return x, y, t * 100
 
 # --- ИНТЕРФЕЙС ---
-st.sidebar.header("Параметры Торсиона")
-f_gain = st.sidebar.slider("Fractal Gain", 0.1, 25.0, 12.0)
-f_bias = st.sidebar.slider("Bias (Смещение)", -5.0, 5.0, 1.5)
-f_torsion = st.sidebar.slider("Torsion Pressure (Пробой L3)", 1.0, 10.0, 2.5)
-threshold = st.sidebar.slider("Gate Threshold", 0.1, 0.99, 0.6)
+st.sidebar.header("Параметры FSIN v3.1")
+f_gain = st.sidebar.slider("Fractal Gain", 0.1, 25.0, 15.0)
+f_bias = st.sidebar.slider("Bias (Смещение)", -5.0, 5.0, 1.0)
+f_torsion = st.sidebar.slider("Torsion (Сжатие L3)", 1.0, 10.0, 3.0)
+f_diff = st.sidebar.slider("Diffusion (Пробой L2/L4)", 0.1, 5.0, 1.2)
+threshold = st.sidebar.slider("Gate Threshold", 0.1, 0.99, 0.5)
 
-st.subheader("S-GPU Реактор: Уровень Абсолюта")
+st.subheader("S-GPU Реактор: Тест Диффузии")
 c1, c2 = st.columns(2)
-p_a = c1.text_input("Импульс А", "ГАРМОНИЯ")
-p_b = c2.text_input("Импульс Б", "ВЕЧНОСТЬ")
+p_a, p_b = c1.text_input("Импульс А", "ГАРМОНИЯ"), c2.text_input("Импульс Б", "ВЕЧНОСТЬ")
 
 img_file = st.file_uploader("Загрузить растр", type=["jpg", "png"])
 
@@ -86,30 +86,28 @@ if img_file:
     img_src = Image.open(img_file).convert('RGB')
     col_l.image(img_src, caption="Входной сигнал", use_container_width=True)
     
-    if st.button("Инициировать Торсионный Прорыв"):
-        with st.spinner("Разворот фазы в точке сингулярности..."):
+    if st.button("Запустить Диффузионный Резонанс"):
+        with st.spinner("Перенос энергии в витки Сфирали..."):
             canv = 1024
             res_img = Image.new('RGB', (canv, canv), (0,0,0))
             px_out, px_src = res_img.load(), img_src.resize((canv, canv)).load()
             
             total = len(nodes)
             diff_count, l_stats = 0, {i:0 for i in range(1, 6)}
-            fsin = FSIN(f_gain, f_bias, f_torsion)
+            fsin = FSIN(f_gain, f_bias, f_torsion, f_diff)
             
-            ph_a = 13.5 + sum(ord(c) for c in p_a) * 0.001
-            ph_b = 13.5 + sum(ord(c) for c in p_b) * 0.001
+            ph_a, ph_b = 13.5 + len(p_a)*0.1, 13.5 + len(p_b)*0.1
 
+            
             for i in range(total):
                 x, y, z_geo = get_sphiral_xyz(i, total)
                 px, py = max(0, min(1023, int((x+300)/600*1023))), max(0, min(1023, int((y+150)/300*1023)))
                 
                 l_idx = min((i // (total // 5)) + 1, 5)
                 z_dat = nodes[i].get('z', 0.0)
-                
-                # S-инверсия: фазовый сдвиг только в петле
                 s_factor = -1.0 if z_geo == 0 else 1.0
                 
-                # Интерференция с учетом антисимметрии
+                # Интерференция + Активация
                 d = abs(math.sin(z_dat * ph_a) - math.sin(z_dat * ph_b * s_factor))
                 activation = fsin.activate(d, l_idx)
                 
@@ -117,32 +115,29 @@ if img_file:
                     diff_count += 1
                     l_stats[l_idx] += 1
                     r, g, b = px_src[px, py]
-                    # Рендеринг торсионного выброса (бирюзовый/пурпурный)
-                    if l_idx == 3: # S-петля
-                        px_out[px, py] = (int(max(0, min(255, r + activation*100))), 
-                                          int(max(0, min(255, g + activation*180))), b)
-                    else: # Витки
-                        px_out[px, py] = (int(max(0, min(255, r + activation*50))), 
-                                          g, int(max(0, min(255, b + activation*200))))
+                    # Визуализация диффузии: S-петля (золото), витки (фиолет)
+                    if l_idx == 3:
+                        px_out[px, py] = (int(max(0, min(255, r + activation*150))), 
+                                          int(max(0, min(255, g + activation*100))), b)
+                    else:
+                        px_out[px, py] = (r, int(max(0, min(255, g + activation*60))), 
+                                          int(max(0, min(255, b + activation*160))))
                 else: px_out[px, py] = px_src[px, py]
 
-            col_r.image(res_img, caption="Torsion Wave Output", use_container_width=True)
+            col_r.image(res_img, caption="Diffusion Wave Output", use_container_width=True)
             
-            # --- ОТЧЕТ v1.3.4 ---
+            # --- ОТЧЕТ ---
             vals = list(l_stats.values())
-            avg_act = np.mean(vals)
-            di = np.std(vals) / avg_act if avg_act > 0 else 0
-            # Эффективность пробоя: отношение активности витков к петле
             breakthrough = (sum(vals) - l_stats[3]) / l_stats[3] * 100 if l_stats[3] > 0 else 0
             
-            st.code(f"""[ОТЧЕТ GIDEON v1.3.4: TORSION WAVE]
-ОПЕРАЦИЯ: {p_a} + {p_b} | TORSION: {f_torsion}
-СТАТУС: Торсионное давление приложено к S-петле.
+            st.code(f"""[ОТЧЕТ GIDEON v1.3.5: DIFFUSION ACTIVE]
+ОПЕРАЦИЯ: {p_a} + {p_b} | DIFFUSION: {f_diff}
+СТАТУС: Пробой сингулярности через диффузию фаз.
 
 МЕТРИКИ:
 - Общая активация: {diff_count} ({(diff_count/total)*100:.1f}%)
-- Di (Индекс девиации): {di:.4f}
-- Эффективность пробоя: {breakthrough:.1f}% (Витковая экспансия)
+- Эффективность пробоя: {breakthrough:.1f}%
+- Состояние: {"ГРАДИЕНТНОЕ" if breakthrough > 10 else "СИНГУЛЯРНОЕ"}
 
 ЛОКАЛИЗАЦИЯ (L1-L5):
 {vals}
