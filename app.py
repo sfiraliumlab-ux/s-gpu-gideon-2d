@@ -1,37 +1,45 @@
 import streamlit as st
+import json
 import math
+import os
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="GIDEON | v1.9.0 Condensation", layout="wide")
-st.title("S-GPU GIDEON v1.9.0: Смысловая Конденсация")
+st.set_page_config(page_title="GIDEON | v2.0.0 Ignition", layout="wide")
+st.title("S-GPU GIDEON v2.0.0: Зажигание Бингла")
 
-# --- ИНИЦИАЛИЗАЦИЯ (Cognitive Loop) ---
+# --- ИНИЦИАЛИЗАЦИЯ (Cognitive Memory) ---
 if 'eb_stable' not in st.session_state:
     st.session_state.eb_stable = 180.0
 if 'meaning_bit' not in st.session_state:
     st.session_state.meaning_bit = 0.0
+if 'iteration' not in st.session_state:
+    st.session_state.iteration = 0
 
-# --- FSIN v9.0: CONDENSER CORE ---
-class FSIN_Condenser:
-    def __init__(self, gain, feedback, threshold):
+# --- FSIN v10.0: IGNITION CORE ---
+class FSIN_Ignition:
+    def __init__(self, gain, fb, limit):
         self.gain = gain
-        self.fb = feedback
-        self.limit = threshold
+        self.fb = fb
+        self.limit = limit
 
-    def compute_condensation(self, eb_current):
-        """Коллапс Eb в дискретный результат при достижении лимита"""
-        if eb_current > self.limit:
-            # Схлопывание: энергия уходит в 'смысл', Eb сбрасывается
-            quantum = math.tanh(eb_current / self.limit)
-            return quantum, eb_current * 0.1 
-        return 0.0, eb_current
+    def get_dynamic_threshold(self, eb):
+        """Снижение порога при высоком Eb (Облегчение пробоя)"""
+        return max(0.3, 0.9 - (eb / 500.0))
 
-# --- ГЕОМЕТРИЯ СФИРАЛИ ---
+    def activate(self, diff, eb):
+        # Экспоненциальная активация: поток Eb модулирует проводимость
+        # Формула ХЯС ИИ: проницаемость растет с ростом Eb
+        flow = (eb * 0.1) * diff * self.gain
+        try:
+            return 1 / (1 + math.exp(-flow + 4.0))
+        except: return 1.0
+
+# --- ГЕОМЕТРИЯ (СФИРАЛЬ БАСАРГИНА) ---
 def get_sphiral_xyz(i, total):
     t = (i / total) * 2 - 1
     R = 150
-    if abs(t) < 0.15: # S-петля
+    if abs(t) < 0.15: # S-петля (Сингулярность)
         sn = (t + 0.15) / 0.3
         return math.cos(sn * math.pi) * R, math.sin(sn * math.pi * 2) * (R/2), 0
     angle, side = t * math.pi * 6, (-1 if t < 0 else 1)
@@ -42,73 +50,94 @@ def get_sphiral_xyz(i, total):
 nodes = [{'id': i, 'z': math.sin(i * 0.05)} for i in range(391392)]
 
 # --- ИНТЕРФЕЙС ---
-st.sidebar.header("Настройка Конденсатора")
-f_gain = st.sidebar.slider("Fractal Gain", 1.0, 30.0, 20.0)
-f_fb = st.sidebar.slider("Feedback (ОС)", 0.0, 1.0, 0.25)
-b_limit = st.sidebar.slider("Bingle Limit (Порог коллапса)", 100.0, 500.0, 250.0)
+st.sidebar.header("Контроль Реактора")
+f_gain = st.sidebar.slider("Fractal Gain (Усиление)", 1.0, 50.0, 25.0)
+f_fb = st.sidebar.slider("Feedback (Самоподзаряд)", 0.1, 1.0, 0.35)
+b_limit = st.sidebar.slider("Bingle Limit (Коллапс)", 100.0, 1000.0, 350.0)
 
-st.subheader(f"Статус Реактора: Eb = {st.session_state.eb_stable:.2f} | Смысл = {st.session_state.meaning_bit:.4f}")
+if st.sidebar.button("⚡ Принудительный импульс (Ignition)"):
+    st.session_state.eb_stable += 50.0
+    st.rerun()
+
+st.subheader(f"Итерация: {st.session_state.iteration} | Потенциал Eb: {st.session_state.eb_stable:.2f}")
 
 c1, c2 = st.columns(2)
 p_a, p_b = c1.text_input("Тезис", "ГАРМОНИЯ"), c2.text_input("Антитезис", "ВЕЧНОСТЬ")
 
-img_file = st.file_uploader("Растр", type=["jpg", "png"])
+img_file = st.file_uploader("Растр-носитель", type=["jpg", "png"])
 
 if img_file:
     cl, cr = st.columns(2)
     img_src = Image.open(img_file).convert('RGB')
     cl.image(img_src, caption="Входной поток", use_container_width=True)
     
-    if st.button("Запустить Конденсацию"):
-        with st.spinner("Схлопывание Бингла в решение..."):
+    if st.button("Инициировать Цикл Синтеза"):
+        with st.spinner("Зажигание Бингла..."):
             canv = 1024
             res_img = Image.new('RGB', (canv, canv), (0,0,0))
             px_out, px_src = res_img.load(), img_src.resize((canv, canv)).load()
             
             total, n_layer = len(nodes), len(nodes) // 5
             l_stats = {i:0 for i in range(1, 6)}
-            fsin = FSIN_Condenser(f_gain, f_fb, b_limit)
+            fsin = FSIN_Ignition(f_gain, f_fb, b_limit)
             
-            # 1. Расчет работы и активации
+            current_eb = st.session_state.eb_stable
+            dyn_threshold = fsin.get_dynamic_threshold(current_eb)
             work_acc = 0
+
             for i in range(total):
                 x, y, z_geo = get_sphiral_xyz(i, total)
                 l_idx = min((i // n_layer) + 1, 5)
                 z_dat = nodes[i].get('z', 0.0)
                 s_f = -1.0 if z_geo == 0 else 1.0
                 
-                # Поток на основе Eb
-                flow = st.session_state.eb_stable * math.sin(z_dat * 13.5)
-                act = 1 / (1 + math.exp(-flow * 0.01 + 5.0))
+                # Интерференция в Сфирали
+                diff = abs(math.sin(z_dat * 13.5) - math.sin(z_dat * 13.5 * s_f))
                 
-                if act > 0.85:
+                # Активация через Ignition Core
+                act = fsin.activate(diff, current_eb)
+                
+                if act > dyn_threshold:
                     l_stats[l_idx] += 1
                     if l_idx != 3: work_acc += act
+                    
                     px = max(0, min(1023, int((x+300)/600*1023)))
                     py = max(0, min(1023, int((y+150)/300*1023)))
-                    px_out[px, py] = (255, 255, 255) if l_idx == 3 else px_src[px, py]
+                    
+                    r, g, b = px_src[px, py]
+                    if l_idx == 3: # Бингл-центр
+                        px_out[px, py] = (255, 255, 255)
+                    else:
+                        px_out[px, py] = (int(max(0, min(255, r + act*50))), 
+                                          int(max(0, min(255, g + current_eb*0.5))), 
+                                          int(max(0, min(255, b + act*150))))
+                else: px_out[px, py] = px_src[px, py]
 
-            # 2. BtW Обратная связь
+            cr.image(res_img, caption="Bingle Ignition Trace", use_container_width=True)
+            
+            # --- ОБНОВЛЕНИЕ ПЕТЛИ ---
+            st.session_state.iteration += 1
             eb_delta = (work_acc / total) * f_fb * 1000
             st.session_state.eb_stable += eb_delta
             
-            # 3. Конденсация Бингла
-            q_bit, eb_new = fsin.compute_condensation(st.session_state.eb_stable)
-            st.session_state.meaning_bit = q_bit
-            st.session_state.eb_stable = eb_new
+            # Проверка коллапса (Бингл)
+            if st.session_state.eb_stable > b_limit:
+                st.session_state.meaning_bit = math.tanh(st.session_state.eb_stable / b_limit)
+                st.session_state.eb_stable *= 0.1 # Сброс энергии в "смысл"
+                status_msg = "КОЛЛАПС: Смысл сформирован!"
+            else:
+                status_msg = "НАКАЧКА: Энергия растет."
 
-            cr.image(res_img, caption="Semantic Trace", use_container_width=True)
-            
-            st.code(f"""[ОТЧЕТ GIDEON v1.9.0: SEMANTIC CONDENSATION]
-СТАТУС: Итерация завершена.
-РЕЗУЛЬТАТ КОЛЛАПСА: {q_bit:.6f} (Смысловой Квант)
+            st.code(f"""[ОТЧЕТ GIDEON v2.0.0: BINGLE IGNITION]
+ИТЕРАЦИЯ: {st.session_state.iteration} | СТАТУС: {status_msg}
+ДИНАМИЧЕСКИЙ ПОРОГ (Gate): {dyn_threshold:.4f}
 
 МЕТРИКИ:
-- Eb до коллапса: {st.session_state.eb_stable + (eb_new if q_bit > 0 else 0):.2f}
-- Eb после сброса: {st.session_state.eb_stable:.2f}
-- КПД системы: {(q_bit * 100):.1f}%
-- Локализация: {list(l_stats.values())}
+- Потенциал Eb (Genesis): {st.session_state.eb_stable:.2f}
+- Прирост dEb: +{eb_delta:.4f}
+- Смысловой Квант: {st.session_state.meaning_bit:.6f}
+- Локализация L1-L5: {list(l_stats.values())}
 
 ЗАКЛЮЧЕНИЕ:
-{"РЕШЕНИЕ ПРИНЯТО (Смысл > 0)" if q_bit > 0 else "НАКОПЛЕНИЕ ПОТЕНЦИАЛА (Eb < Limit)"}
+{"РЕЗОНАНС ПОДТВЕРЖДЕН" if sum(l_stats.values()) > 0 else "ТРЕБУЕТСЯ IGNITION IMPULSE"}
 """, language="text")
