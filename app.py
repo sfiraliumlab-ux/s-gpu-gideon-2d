@@ -5,67 +5,93 @@ import os
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="GIDEON | FSIN Core Alpha", layout="wide")
-st.title("S-GPU GIDEON v1.3.0: Фрактальный Нейрон (FSIN)")
+st.set_page_config(page_title="GIDEON | FSIN & Emergency VRAM", layout="wide")
+st.title("S-GPU GIDEON v1.3.1: Фрактальный Нейрон")
 
-# --- FSIN ENGINE: САМООБУЧАЮЩАЯСЯ СФИРАЛЬ ---
+# --- СЕМАНТИЧЕСКИЙ ГЕНОМ (LOGOS-3) ---
+VOCAB = {
+    "ПОРЯДОК": (1.0, -1.0, 1),   "ХАОС": (-1.0, 1.0, -1),
+    "ЖИЗНЬ": (0.9, -0.9, 1),     "СМЕРТЬ": (-0.9, 0.9, -1),
+    "ИСТИНА": (0.8, -0.8, 1),    "ЛОЖЬ": (-0.8, 0.8, -1),
+    "ГАРМОНИЯ": (0.0, 0.0, 1),   "ВЕЧНОСТЬ": (0.0, 0.0, -1),
+    "БОГ": (0.0, 0.0, 1)
+}
+
+# --- FSIN ENGINE ---
 class FSIN:
-    def __init__(self, energy):
-        self.bias = energy * 0.01
-        self.resonance_history = []
+    def __init__(self, gain):
+        self.gain = gain
+        self.bias = 0.01
 
     def activate(self, diff, s_factor):
-        # Фрактальная функция активации (S-образная)
-        return 1 / (1 + math.exp(-diff * s_factor + self.bias))
+        # Фрактальная S-образная функция активации
+        try:
+            return 1 / (1 + math.exp(- (diff * self.gain * s_factor) + self.bias))
+        except OverflowError:
+            return 1.0 if diff > 0 else 0.0
 
-# --- ЗАГРУЗКА ---
+# --- БЛОК ЗАГРУЗКИ И РЕГЕНЕРАЦИИ ---
 @st.cache_data
-def load_vram(filename):
-    if not os.path.exists(filename): return None
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            d = json.load(f)
-            return d.get('nodes', d) if isinstance(d, dict) else d
-    except: return None
+def load_vram_resource(filename):
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                nodes = data.get('nodes', data) if isinstance(data, dict) else data
+                return nodes, "OK"
+        except Exception as e:
+            return None, f"CORRUPTED: {str(e)}"
+    return None, "NOT_FOUND"
 
-nodes = load_vram('matrix.json')
-if not nodes:
-    st.error("VRAM не найдена. Нажмите кнопку регенерации."); 
-    if st.button("🚀 Регенерация"): 
-        nodes = [{'id':i, 'z':math.sin(i*0.05)} for i in range(391392)]
-        st.rerun()
-    st.stop()
+nodes, vram_status = load_vram_resource('matrix.json')
 
-# --- ГЕОМЕТРИЯ ---
+if vram_status != "OK":
+    st.error(f"❌ Критическая ошибка VRAM: {vram_status}")
+    if st.button("🚀 Регенерировать эталонную VRAM (391 392 узла)"):
+        nodes = [{'id': i, 'z': math.sin(i * 0.05) * math.cos(i * 0.02)} for i in range(391392)]
+        vram_status = "GENERATED"
+        st.success("✅ Матрица восстановлена в оперативной памяти.")
+    else:
+        st.info("Приложение ожидает файл matrix.json или нажатия кнопки регенерации.")
+        st.stop()
+else:
+    st.success(f"✅ VRAM активна: {len(nodes)} узлов загружено из репозитария.")
+
+# --- ГЕОМЕТРИЯ СФИРАЛИ БАСАРГИНА (3D) ---
 def get_xyz(i, total):
     t = (i / total) * 2 - 1
     R = 150
-    if abs(t) < 0.15: # S-петля
+    # S-образная петля (Серединный Предел)
+    if abs(t) < 0.15:
         sn = (t + 0.15) / 0.3
         return math.cos(sn * math.pi) * R, math.sin(sn * math.pi * 2) * (R/2), 0
+    # Зеркальные антисимметричные витки
     angle = t * math.pi * 6
     side = -1 if t < 0 else 1
-    return (R * math.cos(angle) + side * R), (side * R * math.sin(angle) if side < 0 else -R * math.sin(angle)), t * 100
+    x = R * math.cos(angle) + (side * R)
+    y = (side * R * math.sin(angle)) if side < 0 else (-R * math.sin(angle))
+    z = t * 100
+    return x, y, z
 
-# --- ИНТЕРФЕЙС ---
-st.sidebar.header("Параметры FSIN")
-f_gain = st.sidebar.slider("Fractal Gain", 0.1, 5.0, 1.2)
-threshold = st.sidebar.slider("Gate Threshold", 0.5, 0.99, 0.85)
+# --- ИНТЕРФЕЙС УПРАВЛЕНИЯ ---
+st.sidebar.header("Параметры FSIN Core-13")
+f_gain = st.sidebar.slider("Fractal Gain (Проницаемость)", 0.1, 10.0, 1.2)
+threshold = st.sidebar.slider("Gate Threshold (Порог)", 0.1, 0.99, 0.85)
 
-st.subheader("Ввод импульсов (Logos-3)")
+st.subheader("Центральный Реактор")
 c1, c2 = st.columns(2)
 p_a = c1.text_input("Импульс А", "ГАРМОНИЯ")
 p_b = c2.text_input("Импульс Б", "ВЕЧНОСТЬ")
 
-img_file = st.file_uploader("Растр", type=["jpg", "png"])
+img_file = st.file_uploader("Загрузить растровый источник", type=["jpg", "png"])
 
 if img_file:
     col_l, col_r = st.columns(2)
     img_src = Image.open(img_file).convert('RGB')
-    col_l.image(img_src, caption="Входной сигнал", use_container_width=True)
+    col_l.image(img_src, caption="Входной сигнал (Preview)", use_container_width=True)
     
-    if st.button("Запустить FSIN Резонанс"):
-        with st.spinner("Обучение фрактального нейрона..."):
+    if st.button("Инициировать FSIN-резонанс"):
+        with st.spinner("Обучение нейрона на точке сингулярности..."):
             canv = 1024
             res_img = Image.new('RGB', (canv, canv), (0,0,0))
             px_out, px_src = res_img.load(), img_src.resize((canv, canv)).load()
@@ -76,12 +102,14 @@ if img_file:
             
             for i in range(total):
                 x, y, z_geo = get_xyz(i, total)
-                px, py = max(0, min(1023, int((x+300)/600*1023))), max(0, min(1023, int((y+150)/300*1023)))
+                px = max(0, min(1023, int((x + 300) / 600 * 1023)))
+                py = max(0, min(1023, int((y + 150) / 300 * 1023)))
                 
                 z_dat = nodes[i].get('z', 0.0)
+                # Точка сингулярности S-петли
                 s_factor = -1.0 if z_geo == 0 else 1.0
                 
-                # Основная формула FSIN: Дифференциал + Фрактальное смещение
+                # Дифференциальная активация FSIN
                 d = abs(math.sin(z_dat * 13.5) - math.sin(z_dat * 13.5 * s_factor))
                 activation = fsin.activate(d, s_factor)
                 
@@ -89,21 +117,31 @@ if img_file:
                     diff_count += 1
                     l_stats[min((i // (total // 5)) + 1, 5)] += 1
                     r, g, b = px_src[px, py]
-                    px_out[px, py] = (int(max(0, min(255, r + activation*50))), 0, int(max(0, min(255, b + activation*100))))
-                else: px_out[px, py] = px_src[px, py]
+                    # Рендеринг нейронной вспышки
+                    px_out[px, py] = (int(max(0, min(255, r + activation*40))), 
+                                      int(max(0, min(255, g + activation*20))), 
+                                      int(max(0, min(255, b + activation*120))))
+                else:
+                    px_out[px, py] = px_src[px, py]
 
-            col_r.image(res_img, caption="FSIN Topological Output", use_container_width=True)
+            col_r.image(res_img, caption="FSIN 3D Projection", use_container_width=True)
             
             # --- ОТЧЕТ FSIN ---
+            dp = (diff_count / total) * 100
             vals = list(l_stats.values())
             di = np.std(vals) / np.mean(vals) if sum(vals) > 0 else 0
-            st.code(f"""[ОТЧЕТ GIDEON v1.3.0: FSIN ACTIVE]
-ОПЕРАЦИЯ: {p_a} + {p_b} | GAIN: {f_gain}
-СТАТУС: Фрактальный нейрон обучен на S-петле.
+            
+            pair = sorted([p_a.upper(), p_b.upper()])
+            outcome = "БОГ (АБСОЛЮТ)" if "ГАРМОНИЯ" in pair and "ВЕЧНОСТЬ" in pair else "STANDARD"
+
+            st.code(f"""[ОТЧЕТ GIDEON v1.3.1: FSIN ACTIVE]
+ОПЕРАЦИЯ: {p_a} + {p_b} | СИНТЕЗ: {outcome}
+СТАТУС VRAM: {vram_status}
 
 МЕТРИКИ FSIN:
-- Узлов активации: {diff_count}
+- Активация нейрона: {diff_count} узлов ({dp:.1f}%)
 - Индекс девиации (Di): {di:.4f}
-- Эффективность обучения: {(1-di)*100:.1f}%
+- Эффективность пробоя: {(1-di)*100:.1f}%
+
 ЛОКАЛИЗАЦИЯ (L1-L5): {vals}
 """, language="text")
