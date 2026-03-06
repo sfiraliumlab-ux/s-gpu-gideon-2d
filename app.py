@@ -7,47 +7,45 @@ from PIL import Image
 st.set_page_config(page_title="GIDEON | Mirror Mode Stable", layout="wide")
 st.title("S-GPU GIDEON: Дифференциальный анализ (Mirror)")
 
-def get_file_path(filename):
-    """Поиск файла в текущей директории или директории скрипта"""
-    # Вариант 1: Текущая рабочая директория
+# --- ЛОГИКА ЗАГРУЗКИ ---
+def get_path(filename):
+    """Поиск файла в корне или по пути скрипта"""
     if os.path.exists(filename):
         return filename
-    # Вариант 2: Директория, где лежит app.py
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    full_path = os.path.join(base_path, filename)
-    if os.path.exists(full_path):
-        return full_path
-    return None
+    base = os.path.dirname(os.path.abspath(__file__))
+    full = os.path.join(base, filename)
+    return full if os.path.exists(full) else None
 
 @st.cache_data
-def load_json_data(filename):
-    path = get_file_path(filename)
-    if not path:
-        return None
+def load_json(filename):
+    path = get_path(filename)
+    if not path: return None
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            if isinstance(data, dict):
-                return data.get('nodes', data.get('dipoles', []))
-            return data
-    except Exception as e:
-        st.error(f"Ошибка чтения {filename}: {e}")
-        return None
+            return data.get('nodes', data.get('dipoles', [])) if isinstance(data, dict) else data
+    except: return None
 
-# Загрузка компонентов
-nodes = load_json_data('matrix.json')
-core_dipoles = load_json_data('Core-13.json')
+# Загрузка и индикаторы (ВОССТАНОВЛЕНО)
+nodes = load_json('matrix.json')
+core_dipoles = load_json('Core-13.json')
 
-if nodes is None:
-    st.error("Критическая ошибка: Файл 'matrix.json' не найден. Проверьте корень репозитория.")
-    st.info(f"Список файлов в доступе: {os.listdir('.')}")
+if nodes:
+    st.success(f"✅ VRAM активна: {len(nodes)} узлов загружено из репозитария.")
+else:
+    st.error("❌ Критическая ошибка: 'matrix.json' не найден. Загрузите файл в корень.")
     st.stop()
 
-# Панель управления
+if core_dipoles:
+    st.sidebar.success(f"✅ Процессор Core-13: {len(core_dipoles)} диполей активно.")
+else:
+    st.sidebar.warning("⚠️ Core-13.json не найден. Ядро в режиме эмуляции.")
+
+# --- ИНТЕРФЕЙС ---
 st.sidebar.header("Параметры ядра")
 base_energy = st.sidebar.slider("Базовая Энергия", 0.0, 25.0, 18.0)
 base_phase = st.sidebar.slider("Базовая Фаза", 0.0, 40.0, 13.5)
-# Для сепарации ЖИЗНЬ/СМЕРТЬ рекомендовано 0.85
+# Рекомендованный порог для ЖИЗНЬ/СМЕРТЬ: 0.85
 threshold = st.sidebar.slider("Порог сепарации", 0.1, 0.98, 0.85)
 
 st.subheader("Дифференциальный ввод (Зеркало)")
@@ -62,13 +60,13 @@ def get_params(text, b_e, b_p):
 e_a, p_a = get_params(pulse_a, base_energy, base_phase)
 e_b, p_b = get_params(pulse_b, base_energy, base_phase)
 
-# Работа с изображением
 image_file = st.file_uploader("Загрузите растровый источник", type=["jpg", "jpeg", "png"])
 
 if image_file is not None:
     col1, col2 = st.columns(2)
     orig_img = Image.open(image_file).convert('RGB')
-    # Превью отображается сразу после загрузки
+    
+    # ПРЕВЬЮ (ВОССТАНОВЛЕНО - вне блока кнопки)
     col1.image(orig_img, caption="Входной сигнал (Preview)", use_container_width=True)
     
     if st.button("Запустить дифференциальный резонанс"):
@@ -78,21 +76,22 @@ if image_file is not None:
             output_pixels = output_img.load()
             rgb_map = orig_img.resize((canvas_size, canvas_size)).load()
             
-            total_nodes = len(nodes)
-            side = int(math.sqrt(total_nodes))
-            rows = math.ceil(total_nodes / side)
+            total = len(nodes)
+            side = int(math.sqrt(total))
+            rows = math.ceil(total / side)
             
             diff_count = 0
             layer_diff = {1:0, 2:0, 3:0, 4:0, 5:0}
-            nodes_per_layer = total_nodes // 5
+            nodes_per_layer = total // 5
             
-            for i in range(total_nodes):
+            for i in range(total):
                 c_idx, r_idx = i % side, i // side
                 px = max(0, min(1023, int((c_idx/side)*1023)))
                 py = max(0, min(1023, int((r_idx/rows)*1023)))
                 
                 z = nodes[i].get('z', 0.0) if isinstance(nodes[i], dict) else 0.0
                 
+                # Математика Зеркала
                 int_a = e_a * math.sin(z * p_a)
                 int_b = e_b * math.sin(z * p_b)
                 diff_signal = abs(int_a - int_b)
@@ -102,7 +101,7 @@ if image_file is not None:
                     layer_diff[min((i // nodes_per_layer) + 1, 5)] += 1
                     
                     r, g, b = rgb_map[px, py]
-                    # Сдвиг в бирюзово-фиолетовый спектр для визуализации разности
+                    # Спектральная окраска разности
                     new_r = int(max(0, min(255, r - diff_signal * 5)))
                     new_g = int(max(0, min(255, g + diff_signal * 10)))
                     new_b = int(max(0, min(255, b + diff_signal * 15)))
@@ -116,10 +115,10 @@ if image_file is not None:
             
             col2.image(output_img, caption=f"Разница: {pulse_a} vs {pulse_b}", use_container_width=True)
             
-            # Отчет
+            # ОТЧЕТ (ВОССТАНОВЛЕНО)
             st.code(f"""[ОТЧЕТ GIDEON: MIRROR MODE]
 Сравнение: {pulse_a} / {pulse_b}
-Уникальных узлов разности: {diff_count} ({(diff_count/total_nodes)*100:.1f}%)
+Уникальных узлов разности: {diff_count} ({(diff_count/total)*100:.1f}%)
 
 ЛОКАЛИЗАЦИЯ РАЗЛИЧИЙ ПО СЛОЯМ ВЛОЖЕННОСТИ:
 L1 (Поверхность): {layer_diff[1]}
