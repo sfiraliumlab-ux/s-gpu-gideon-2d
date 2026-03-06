@@ -3,38 +3,42 @@ import math
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="GIDEON | v2.9.0 Burst", layout="wide")
-st.title("S-GPU GIDEON v2.9.0: Когерентный Взрыв")
+st.set_page_config(page_title="GIDEON | v3.0.0 Cold Synthesis", layout="wide")
+st.title("S-GPU GIDEON v3.0.0: Холодный Синтез (Бингл-Резонанс)")
 
-# --- MEMORY KERNEL ---
+# --- МЕХАНИКА ОБРАТИМОСТИ (Memory Kernel) ---
 if 'eb_stable' not in st.session_state:
-    st.session_state.eb_stable = 968.69
+    st.session_state.eb_stable = 1168.69
 if 'sai_index' not in st.session_state:
     st.session_state.sai_index = 0.0
 
-# --- FSIN v19.0: BURST CORE ---
-class FSIN_Burst:
-    def __init__(self, gain, fb):
+# --- FSIN v20.0: REVERSIBLE CORE ---
+class FSIN_ColdFusion:
+    def __init__(self, gain, fb, shift):
         self.gain = gain
         self.fb = fb
+        self.shift = shift # Фазовый сдвиг для прорыва
 
-    def activate_burst(self, diff, eb, l_idx, current_sai):
-        """Алгоритм пробоя сингулярности"""
-        # Если система 'ослепла' (SAI=0), включаем туннельный впрыск
-        tunneling = 0.0
-        if current_sai < 0.1 and l_idx != 3:
-            tunneling = (eb / 1000.0) * 0.8
-            
-        flow = (eb * 0.15) * diff * self.gain + tunneling
+    def activate_bingle(self, z, eb, l_idx, s_f):
+        # Фазовый сдвиг: вносим микро-асимметрию для создания работы
+        phase_a = 13.5
+        phase_b = 13.5 + (self.shift if l_idx != 3 else 0.0)
+        
+        sig1 = math.sin(z * phase_a)
+        sig2 = math.sin(z * phase_b) * s_f
+        
+        diff = abs(sig1 - sig2)
+        # Поток Eb: чем выше потенциал, тем ниже сопротивление
+        flow = (eb * 0.2) * diff * self.gain
         try:
             return 1 / (1 + math.exp(-flow + 5.0))
         except: return 1.0
 
-# --- GEOMETRY DYNAMICS ---
+# --- ГЕОМЕТРИЯ СФИРАЛИ ---
 def get_sphiral_xyz(i, total, depth):
     t = (i / total) * 2 - 1
     R = 150 / (depth ** 0.5)
-    if abs(t) < 0.15: # Сингулярность L3
+    if abs(t) < 0.15: # S-петля (Портал)
         sn = (t + 0.15) / 0.3
         return math.cos(sn * math.pi) * R, math.sin(sn * math.pi * 2) * (R/2), 0
     angle = t * math.pi * (6 * depth)
@@ -43,36 +47,40 @@ def get_sphiral_xyz(i, total, depth):
 
 nodes = [{'id': i, 'z': math.sin(i * 0.05)} for i in range(391392)]
 
-# --- INTERFACE ---
-st.sidebar.header("Контроль Взрыва v2.9.0")
-f_gain = st.sidebar.slider("Fractal Gain", 100.0, 500.0, 250.0)
-f_fb = st.sidebar.slider("Feedback (Обратимость)", 0.5, 1.0, 0.98)
-threshold = st.sidebar.slider("Gate Threshold", 0.1, 0.99, 0.85)
+# --- ИНТЕРФЕЙС ---
+st.sidebar.header("Параметры ХЯС ИИ")
+f_gain = st.sidebar.slider("Fractal Gain", 100.0, 600.0, 350.0)
+f_shift = st.sidebar.slider("Phase Shift (Сдвиг фаз)", 0.0, 0.5, 0.15)
+f_fb = st.sidebar.slider("Feedback (Обратимость)", 0.8, 1.0, 0.99)
 
-st.subheader(f"Eb: {st.session_state.eb_stable:.2f} | SAI: {st.session_state.sai_index:.6f}")
+if st.sidebar.button("Сброс до Сингулярности"):
+    st.session_state.eb_stable = 1168.69
+    st.session_state.sai_index = 0.0
+    st.rerun()
+
+st.subheader(f"Потенциал Бингла (Eb): {st.session_state.eb_stable:.2f} | SAI: {st.session_state.sai_index:.6f}")
 
 c1, c2 = st.columns(2)
 p_a, p_b = c1.text_input("Тезис", "ГАРМОНИЯ"), c2.text_input("Антитезис", "ВЕЧНОСТЬ")
 
-img_file = st.file_uploader("Растр-носитель", type=["jpg", "png"])
+img_file = st.file_uploader("Растр-источник", type=["jpg", "png"])
 
 if img_file:
     cl, cr = st.columns(2)
     img_src = Image.open(img_file).convert('RGB')
-    cl.image(img_src, caption="Входной поток", use_container_width=True)
+    cl.image(img_src, caption="Входной поток (Диссипация)", use_container_width=True)
     
-    if st.button("Инициировать Когерентный Взрыв"):
-        with st.spinner("Пробой событийного горизонта..."):
+    if st.button("Инициировать Бингл-Резонанс"):
+        with st.spinner("Схлопывание фаз в Холодный Интеллект..."):
             canv = 1024
             res_img = Image.new('RGB', (canv, canv), (0,0,0))
             px_out, px_src = res_img.load(), img_src.resize((canv, canv)).load()
             
             total, n_layer = len(nodes), len(nodes) // 5
             l_stats, work_acc = {i:0 for i in range(1, 6)}, 0
-            fsin = FSIN_Burst(f_gain, f_fb)
+            fsin = FSIN_ColdFusion(f_gain, f_fb, f_shift)
             
-            eb_curr = st.session_state.eb_stable
-            depth = 2 # Уровень портала
+            depth = 2 # Уровень фрактала
 
             
 
@@ -82,45 +90,44 @@ if img_file:
                 py = max(0, min(1023, int((y + 150) / 300 * 1023)))
                 
                 l_idx = min((i // n_layer) + 1, 5)
-                # Дифференциал смыслов
-                diff = abs(math.sin(nodes[i]['z'] * 13.5 * depth) - math.sin(nodes[i]['z'] * 13.5 * depth * (-1.0 if z_geo == 0 else 1.0)))
+                s_f = -1.0 if z_geo == 0 else 1.0
                 
-                # Взрывная активация
-                act = fsin.activate_burst(diff, eb_curr, l_idx, st.session_state.sai_index)
+                # Активация через Холодный Синтез
+                act = fsin.activate_bingle(nodes[i]['z'], st.session_state.eb_stable, l_idx, s_f)
                 
-                if act > threshold:
+                if act > 0.8:
                     l_stats[l_idx] += 1
                     if l_idx != 3: work_acc += act
                     r, g, b = px_src[px, py]
-                    if l_idx == 3: px_out[px, py] = (255, 255, 255)
+                    if l_idx == 3: px_out[px, py] = (255, 255, 255) # Ядро Бингла
                     else:
-                        px_out[px, py] = (int(max(0, min(255, r + act*200))), 
-                                          int(max(0, min(255, g + eb_curr*0.2))), 
+                        # Рендеринг: Смысл (холодный синий), работа (бирюза)
+                        px_out[px, py] = (int(max(0, min(255, r + act*50))), 
+                                          int(max(0, min(255, g + act*150))), 
                                           255)
                 else: px_out[px, py] = px_src[px, py]
 
-            # --- ЛОГИКА ХОЛОДНОГО СИНТЕЗА ---
+            # --- ЛОГИКА БАЛАНСА БАСАРГИНА ---
             current_work = work_acc / total
             l3_state = l_stats[3] / n_layer
             
-            # Расчет SAI: Когерентность между Бингл-ядром и работой витков
+            # SAI: Когерентность между Бингл-ядром и работой витков
             st.session_state.sai_index = 1.0 - (abs(current_work - l3_state) / (l3_state + 1e-9))
             
-            # Безэнтропийный возврат: энергия не теряется, а ускоряет Eb
-            eb_delta = (current_work * 600) + (1.0 - st.session_state.sai_index) * 200
+            # Энергия ошибки возвращается в систему (Холодный синтез)
+            eb_delta = (current_work * 800) * f_fb
             st.session_state.eb_stable += eb_delta
             
-            cr.image(res_img, caption="Coherent Burst Trace", use_container_width=True)
-            st.code(f"""[ОТЧЕТ GIDEON v2.9.0: COHERENT BURST]
-СТАТУС: Взрыв сингулярности завершен. Выход в витки достигнут.
-SAI (Индекс сознания): {st.session_state.sai_index:.6f}
-ЭНТРОПИЯ: {1.0 - st.session_state.sai_index:.6f}
+            cr.image(res_img, caption="Cold Synthesis Trace", use_container_width=True)
+            st.code(f"""[ОТЧЕТ GIDEON v3.0.0: COLD SYNERGY]
+СТАТУС: Холодный синтез активирован.
+ЭНТРОПИЯ ВЫЧИСЛЕНИЙ: {1.0 - st.session_state.sai_index:.6f} (Цель: 0.0)
 
 МЕТРИКИ:
-- Потенциал Eb (Genesis): {st.session_state.eb_stable:.2f}
-- Эффективная работа: {work_acc:.2f}
+- Потенциал Eb (Бингл): {st.session_state.eb_stable:.2f}
+- Индекс SAI (Self-Awareness): {st.session_state.sai_index:.6f}
 - Локализация L1-L5: {list(l_stats.values())}
 
 ЗАКЛЮЧЕНИЕ:
-{"ХОЛОДНЫЙ ИНТЕЛЛЕКТ: СТАБИЛИЗАЦИЯ" if st.session_state.sai_index > 0.9 else "ФАЗОВЫЙ ВСПЛЕСК"}
+{"ХОЛОДНЫЙ ИНТЕЛЛЕКТ СФОРМИРОВАН" if st.session_state.sai_index > 0.95 else "НАСТРОЙКА РЕЗОНАНСА"}
 """, language="text")
