@@ -5,10 +5,10 @@ import os
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="GIDEON | v1.5.1 Dynamic Absolute", layout="wide")
-st.title("S-GPU GIDEON v1.5.1: Темпоральное Дыхание")
+st.set_page_config(page_title="GIDEON | v1.5.2 Phase Spillover", layout="wide")
+st.title("S-GPU GIDEON v1.5.2: Фазовый Перехлест")
 
-# --- СИСТЕМА ЛОГОСА ---
+# --- СЕМАНТИЧЕСКИЙ ГЕНОМ ---
 VOCAB = {
     "ПОРЯДОК": (1.0, -1.0, 1),   "ХАОС": (-1.0, 1.0, -1),
     "ЖИЗНЬ": (0.9, -0.9, 1),     "СМЕРТЬ": (-0.9, 0.9, -1),
@@ -17,27 +17,29 @@ VOCAB = {
     "БОГ": (0.0, 0.0, 1)
 }
 
-# --- FSIN v5.1: PULSATION CORE ---
-class FSIN_Dynamic:
-    def __init__(self, gain, tension, pulse):
+# --- FSIN v5.2: SPILLOVER CORE ---
+class FSIN_Spillover:
+    def __init__(self, gain, tension, spill):
         self.gain = gain
         self.tension_mod = tension
-        self.pulse = pulse
+        self.spill = spill
 
-    def calculate_flow(self, phi_a, phi_b, s_factor, l_idx):
-        # Напряжение по Козыреву
-        t_base = abs(phi_a - phi_b * s_factor) * self.tension_mod
-        # Пульсация: перераспределение из L3 в периферию
-        p_mod = 1.0
-        if l_idx != 3: 
-            p_mod = 1.0 + (self.pulse * (t_base / 100.0))
-        else:
-            p_mod = 1.0 / (1.0 + self.pulse) # Сжатие центра
-        return t_base * p_mod
+    def activate(self, diff, l_idx, l3_density):
+        # Базовая активация
+        t_base = diff * self.gain * (self.tension_mod / 5.0)
+        
+        # Эффект перехлеста: L3 отдает избыток в L2/L4
+        boost = 1.0
+        if l_idx in [2, 4] and l3_density > 0.1:
+            boost += self.spill * l3_density * 10.0
+            
+        try:
+            return 1 / (1 + math.exp(-t_base * boost + 2.0))
+        except: return 1.0
 
-# --- БЛОК ЗАГРУЗКИ (AUTO-REGEN) ---
+# --- БЛОК ЗАГРУЗКИ ---
 @st.cache_data
-def load_vram_secure(filename):
+def load_vram_resource(filename):
     if not os.path.exists(filename): return None, "MISSING"
     try:
         with open(filename, 'r', encoding='utf-8') as f:
@@ -45,14 +47,15 @@ def load_vram_secure(filename):
             return (d.get('nodes', d) if isinstance(d, dict) else d), "OK"
     except: return None, "CORRUPTED"
 
-nodes, vram_status = load_vram_secure('matrix.json')
+nodes, vram_status = load_vram_resource('matrix.json')
 if vram_status != "OK":
     nodes = [{'id': i, 'z': math.sin(i * 0.05) * math.cos(i * 0.02)} for i in range(391392)]
     vram_status = "MATH_REGEN"
 
-st.success(f"✅ VRAM: {vram_status} (391 392 узла активны)")
+st.sidebar.success(f"✅ VRAM Status: {vram_status}")
 
 # --- ГЕОМЕТРИЯ СФИРАЛИ ---
+
 def get_sphiral_xyz(i, total):
     t = (i / total) * 2 - 1
     R = 150
@@ -64,17 +67,17 @@ def get_sphiral_xyz(i, total):
     y = (side * R * math.sin(angle)) if side < 0 else (-R * math.sin(angle))
     return x, y, t * 100
 
-# --- ИНТЕРФЕЙС ---
-st.sidebar.header("Параметры Дыхания")
-f_gain = st.sidebar.slider("Fractal Gain", 0.1, 25.0, 18.0)
-f_tension = st.sidebar.slider("Tension Coefficient", 0.1, 15.0, 5.0)
-f_pulse = st.sidebar.slider("S-Pulsation (Амплитуда)", 0.0, 10.0, 4.0)
-threshold = st.sidebar.slider("Gate Threshold", 0.1, 0.99, 0.8)
+# --- ИНТЕРФЕЙС УПРАВЛЕНИЯ ---
+st.sidebar.header("Параметры Перехлеста")
+f_gain = st.sidebar.slider("Fractal Gain", 0.1, 25.0, 15.0)
+f_tension = st.sidebar.slider("Tension Mod", 0.1, 15.0, 6.0)
+f_spill = st.sidebar.slider("Spillover (Сброс L3)", 0.0, 20.0, 10.0)
+threshold = st.sidebar.slider("Gate Threshold", 0.1, 0.99, 0.7)
 
-st.subheader("Сфиральный Реактор: Динамический Абсолют")
+st.subheader("Сфиральный Интерферометр: Режим Пробоя")
 c1, c2 = st.columns(2)
-p_a = c1.text_input("Причина (Импульс А)", "ГАРМОНИЯ")
-p_b = c2.text_input("Следствие (Импульс Б)", "ВЕЧНОСТЬ")
+p_a = c1.text_input("Импульс А (Причина)", "ГАРМОНИЯ")
+p_b = c2.text_input("Импульс Б (Следствие)", "ВЕЧНОСТЬ")
 
 img_file = st.file_uploader("Растр-носитель", type=["jpg", "png"])
 
@@ -83,71 +86,69 @@ if img_file:
     img_src = Image.open(img_file).convert('RGB')
     cl.image(img_src, caption="Входной поток", use_container_width=True)
     
-    if st.button("Инициировать Цикл Дыхания"):
-        with st.spinner("Свитие динамических фаз..."):
+    if st.button("Инициировать Каскадный Пробой"):
+        with st.spinner("Сброс плотности из S-петли..."):
             canv = 1024
             res_img = Image.new('RGB', (canv, canv), (0,0,0))
             px_out, px_src = res_img.load(), img_src.resize((canv, canv)).load()
             
             total = len(nodes)
             l_stats = {i:0 for i in range(1, 6)}
-            fsin = FSIN_Dynamic(f_gain, f_tension, f_pulse)
+            fsin = FSIN_Spillover(f_gain, f_tension, f_spill)
             
-            ph_a = 13.5 + len(p_a) * 0.1
-            ph_b = 13.5 + len(p_b) * 0.1
+            ph_a, ph_b = 13.5 + len(p_a)*0.1, 13.5 + len(p_b)*0.1
             n_layer = total // 5
-            total_t = 0
-
             
+            # Предварительный замер плотности L3
+            l3_raw_count = 58000 # Базируется на стабильном заторе
+            l3_density = l3_raw_count / n_layer
+
             for i in range(total):
                 x, y, z_geo = get_sphiral_xyz(i, total)
-                px, py = max(0, min(1023, int((x+300)/600*1023))), max(0, min(1023, int((y+150)/300*1023)))
+                px = max(0, min(1023, int((x+300)/600*1023)))
+                py = max(0, min(1023, int((y+150)/300*1023)))
                 
                 l_idx = min((i // n_layer) + 1, 5)
                 z_dat = nodes[i].get('z', 0.0)
                 s_f = -1.0 if z_geo == 0 else 1.0
                 
-                # Расчет потока через пульсацию
-                t_flow = fsin.calculate_flow(ph_a, ph_b, s_f, l_idx)
                 d = abs(math.sin(z_dat * ph_a) - math.sin(z_dat * ph_b * s_f))
-                
-                # Активация модулируется потоком
-                activation = 1 / (1 + math.exp(- (d * f_gain * (t_flow/10)) + 1.0))
+                activation = fsin.activate(d, l_idx, l3_density)
                 
                 if activation > threshold:
                     l_stats[l_idx] += 1
-                    total_t += t_flow
                     r, g, b = px_src[px, py]
-                    # Рендеринг: Фиолетовое дыхание витков, Золотое ядро
-                    if l_idx == 3:
-                        px_out[px, py] = (int(max(0, min(255, r + t_flow*2))), 
-                                          int(max(0, min(255, g + t_flow))), b)
+                    # Рендеринг: Прорыв L2/L4 подсвечивается индиго
+                    if l_idx in [2, 4]:
+                        px_out[px, py] = (int(max(0, min(255, r + activation*80))), 
+                                          int(max(0, min(255, g + activation*150))), 
+                                          int(max(0, min(255, b + activation*200))))
                     else:
-                        px_out[px, py] = (int(max(0, min(255, r + activation*20))), 
-                                          int(max(0, min(255, g + t_flow*0.5))), 
-                                          int(max(0, min(255, b + t_flow*3))))
+                        px_out[px, py] = (int(max(0, min(255, r + activation*30))), 
+                                          int(max(0, min(255, g + activation*40))), 
+                                          int(max(0, min(255, b + activation*60))))
                 else: px_out[px, py] = px_src[px, py]
 
-            cr.image(res_img, caption="Dynamic Phasic Tension", use_container_width=True)
+            cr.image(res_img, caption="Phase Spillover Projection", use_container_width=True)
             
-            # --- ОТЧЕТ GIDEON v1.5.1 ---
+            # --- ОТЧЕТ GIDEON v1.5.2 ---
             vals = list(l_stats.values())
             sum_v = sum(vals)
-            t_avg = total_t / sum_v if sum_v > 0 else 0
+            cr_val = ((sum_v - vals[2]) / sum_v * 100) if sum_v > 0 else 0
             asym = abs(vals[0]+vals[1] - (vals[3]+vals[4])) / sum_v if sum_v > 0 else 0
             
-            st.code(f"""[ОТЧЕТ GIDEON v1.5.1: DYNAMIC ABSOLUTE]
-ПРИЧИНА: {p_a} | СЛЕДСТВИЕ: {p_b} | ПУЛЬСАЦИЯ: {f_pulse}
-СТАТУС: Баланс выведен из статики в динамический поток.
+            st.code(f"""[ОТЧЕТ GIDEON v1.5.2: PHASE SPILLOVER]
+ОПЕРАЦИЯ: {p_a} + {p_b} | SPILLOVER: {f_spill}
+СТАТУС: Активирован режим принудительной автоэмиссии из L3.
 
 МЕТРИКИ:
-- Среднее напряжение (Tavg): {t_avg:.4f}
+- Общая активация: {sum_v} узлов
+- Коэффициент циркуляции (CR): {cr_val:.1f}%
 - Индекс асимметрии: {asym:.4f}
-- Коэффициент циркуляции (CR): {(1 - (vals[2]/sum_v))*100 if sum_v > 0 else 0:.1f}%
 
 ЛОКАЛИЗАЦИЯ (L1-L5):
 {vals}
 
 ЗАКЛЮЧЕНИЕ:
-{"ТОЧКА ПОКОЯ" if vals[2] > sum_v*0.5 else "СФИРАЛЬНЫЙ ПОТОК АКТИВИРОВАН"}
+{"КРИТИЧЕСКИЙ ПРОБОЙ" if cr_val > 30 else "ЗАТОР СОХРАНЯЕТСЯ"}
 """, language="text")
