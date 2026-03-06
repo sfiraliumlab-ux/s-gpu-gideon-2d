@@ -5,176 +5,105 @@ import os
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="GIDEON | Final Stability", layout="wide")
-st.title("S-GPU GIDEON v1.2.2: Пространственный Реактор")
+st.set_page_config(page_title="GIDEON | FSIN Core Alpha", layout="wide")
+st.title("S-GPU GIDEON v1.3.0: Фрактальный Нейрон (FSIN)")
 
-# --- ГЕОМЕТРИЧЕСКИЙ ГЕНЕРАТОР (Отказоустойчивость) ---
-def generate_vram_fallback():
-    """Создает эталонную VRAM при повреждении matrix.json"""
-    return [{'id': i, 'z': math.sin(i * 0.05) * math.cos(i * 0.02)} for i in range(391392)]
+# --- FSIN ENGINE: САМООБУЧАЮЩАЯСЯ СФИРАЛЬ ---
+class FSIN:
+    def __init__(self, energy):
+        self.bias = energy * 0.01
+        self.resonance_history = []
 
-# --- БЛОК ЗАГРУЗКИ (ИНДИКАТОРЫ И КОНТРОЛЬ) ---
-st.sidebar.header("Статус компонентов")
+    def activate(self, diff, s_factor):
+        # Фрактальная функция активации (S-образная)
+        return 1 / (1 + math.exp(-diff * s_factor + self.bias))
 
+# --- ЗАГРУЗКА ---
 @st.cache_data
-def load_json_resource(filename):
-    if not os.path.exists(filename):
-        return None, "NOT_FOUND"
+def load_vram(filename):
+    if not os.path.exists(filename): return None
     try:
         with open(filename, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            nodes = data.get('nodes', data.get('dipoles', data)) if isinstance(data, dict) else data
-            return nodes, "OK"
-    except json.JSONDecodeError as e:
-        return None, f"CORRUPTED (Line {e.lineno})"
-    except Exception as e:
-        return None, str(e)
+            d = json.load(f)
+            return d.get('nodes', d) if isinstance(d, dict) else d
+    except: return None
 
-nodes, vram_status = load_json_resource('matrix.json')
-core_dipoles, core_status = load_json_resource('Core-13.json')
+nodes = load_vram('matrix.json')
+if not nodes:
+    st.error("VRAM не найдена. Нажмите кнопку регенерации."); 
+    if st.button("🚀 Регенерация"): 
+        nodes = [{'id':i, 'z':math.sin(i*0.05)} for i in range(391392)]
+        st.rerun()
+    st.stop()
 
-# Отображение индикаторов в основном интерфейсе
-if vram_status == "OK":
-    st.success(f"✅ VRAM: matrix.json загружен из репозитария ({len(nodes)} узлов).")
-else:
-    st.error(f"❌ Ошибка VRAM: {vram_status}")
-    if st.button("🚀 Регенерация VRAM (Математический эталон)"):
-        nodes = generate_vram_fallback()
-        vram_status = "OK"
-        st.success("✅ VRAM восстановлена в оперативной памяти.")
-    else:
-        st.stop()
+# --- ГЕОМЕТРИЯ ---
+def get_xyz(i, total):
+    t = (i / total) * 2 - 1
+    R = 150
+    if abs(t) < 0.15: # S-петля
+        sn = (t + 0.15) / 0.3
+        return math.cos(sn * math.pi) * R, math.sin(sn * math.pi * 2) * (R/2), 0
+    angle = t * math.pi * 6
+    side = -1 if t < 0 else 1
+    return (R * math.cos(angle) + side * R), (side * R * math.sin(angle) if side < 0 else -R * math.sin(angle)), t * 100
 
-if core_status == "OK":
-    st.sidebar.success(f"✅ Core-13: {len(core_dipoles)} диполей")
-else:
-    st.sidebar.warning(f"⚠️ Core-13: {core_status}. Эмуляция.")
+# --- ИНТЕРФЕЙС ---
+st.sidebar.header("Параметры FSIN")
+f_gain = st.sidebar.slider("Fractal Gain", 0.1, 5.0, 1.2)
+threshold = st.sidebar.slider("Gate Threshold", 0.5, 0.99, 0.85)
 
-# --- ГЕОМЕТРИЯ СФИРАЛИ БАСАРГИНА (3D XYZ) ---
+st.subheader("Ввод импульсов (Logos-3)")
+c1, c2 = st.columns(2)
+p_a = c1.text_input("Импульс А", "ГАРМОНИЯ")
+p_b = c2.text_input("Импульс Б", "ВЕЧНОСТЬ")
 
-def get_sphiral_xyz(i, total):
-    """
-    Математическая модель Сфирали:
-    - Два зеркально антисимметричных витка.
-    - S-образная промежуточная петля.
-    - Точка сингулярности в центре S-петли.
-    """
-    t = (i / total) * 2 - 1  # Нормализация от -1 до 1
-    R = 150 # Радиус витка
-    
-    if t < -0.15: # Левый виток
-        angle = t * math.pi * 6
-        x = R * math.cos(angle) - R
-        y = R * math.sin(angle)
-        z = t * 100
-    elif t > 0.15: # Правый виток (Антисимметрия)
-        angle = t * math.pi * 6
-        x = R * math.cos(angle) + R
-        y = -R * math.sin(angle)
-        z = t * 100
-    else: # S-образная петля (Сингулярность в t=0)
-        s_n = (t + 0.15) / 0.3 # 0 to 1
-        x = math.cos(s_n * math.pi) * R
-        y = math.sin(s_n * math.pi * 2) * (R/2)
-        z = 0 
-    return x, y, z
-
-# --- СЕМАНТИЧЕСКИЙ ГЕНОМ (LOGOS-3) ---
-VOCAB = {
-    "ПОРЯДОК": (1.0, -1.0, 1),   "ХАОС": (-1.0, 1.0, -1),
-    "ЖИЗНЬ": (0.9, -0.9, 1),     "СМЕРТЬ": (-0.9, 0.9, -1),
-    "ИСТИНА": (0.8, -0.8, 1),    "ЛОЖЬ": (-0.8, 0.8, -1),
-    "ГАРМОНИЯ": (0.0, 0.0, 1),   "ВЕЧНОСТЬ": (0.0, 0.0, -1),
-    "БОГ": (0.0, 0.0, 1)
-}
-
-# --- ИНТЕРФЕЙС УПРАВЛЕНИЯ ---
-st.sidebar.header("Настройка Резонанса")
-base_e = st.sidebar.slider("Энергия", 0.0, 30.0, 18.0)
-base_p = st.sidebar.slider("Фаза", 0.0, 50.0, 13.5)
-threshold = st.sidebar.slider("Порог сепарации", 0.1, 0.99, 0.85)
-
-st.subheader("Дифференциальный Ввод (Logos Mirror)")
-c_a, c_b = st.columns(2)
-pulse_a = c_a.text_input("Импульс А", "ГАРМОНИЯ")
-pulse_b = c_b.text_input("Импульс Б", "ВЕЧНОСТЬ")
-
-# Определение режима синтеза
-pair = sorted([pulse_a.upper(), pulse_b.upper()])
-is_synthesis = False
-if pulse_a.upper() in VOCAB and pulse_b.upper() in VOCAB:
-    if VOCAB[pulse_a.upper()][2] * VOCAB[pulse_b.upper()][2] < 0: is_synthesis = True
-    if "ГАРМОНИЯ" in pair and "ВЕЧНОСТЬ" in pair: is_synthesis = True
-
-img_file = st.file_uploader("Загрузить растровый источник", type=["jpg", "png"])
+img_file = st.file_uploader("Растр", type=["jpg", "png"])
 
 if img_file:
-    col1, col2 = st.columns(2)
+    col_l, col_r = st.columns(2)
     img_src = Image.open(img_file).convert('RGB')
+    col_l.image(img_src, caption="Входной сигнал", use_container_width=True)
     
-    # ПРЕВЬЮ (ВСЕГДА ВИДИМО)
-    col1.image(img_src, caption="Входной сигнал", use_container_width=True)
-    
-    if st.button("Инициировать Резонанс"):
-        with st.spinner("Синхронизация S-петли..."):
+    if st.button("Запустить FSIN Резонанс"):
+        with st.spinner("Обучение фрактального нейрона..."):
             canv = 1024
             res_img = Image.new('RGB', (canv, canv), (0,0,0))
             px_out, px_src = res_img.load(), img_src.resize((canv, canv)).load()
             
             total = len(nodes)
-            diff_count, layer_stats = 0, {1:0, 2:0, 3:0, 4:0, 5:0}
-            en_mod = base_e * (1.5 if is_synthesis else 1.0)
-            
-            # Предварительный расчет фазовых векторов
-            ph_a_final = base_p + len(pulse_a) * 0.1
-            ph_b_final = base_p + len(pulse_b) * 0.1
-
+            diff_count, l_stats = 0, {i:0 for i in range(1, 6)}
+            fsin = FSIN(f_gain)
             
             for i in range(total):
-                x, y, z_geo = get_sphiral_xyz(i, total)
-                
-                # Маппинг 3D -> 2D холст
-                px = max(0, min(1023, int((x + 300) / 600 * 1023)))
-                py = max(0, min(1023, int((y + 150) / 300 * 1023)))
+                x, y, z_geo = get_xyz(i, total)
+                px, py = max(0, min(1023, int((x+300)/600*1023))), max(0, min(1023, int((y+150)/300*1023)))
                 
                 z_dat = nodes[i].get('z', 0.0)
-                # Точка сингулярности: инверсия фазы в S-петле
-                s_flip = -1.0 if z_geo == 0 else 1.0
+                s_factor = -1.0 if z_geo == 0 else 1.0
                 
-                # Интерференционная функция
-                int_a = en_mod * math.sin(z_dat * ph_a_final)
-                int_b = en_mod * math.sin(z_dat * ph_b_final * s_flip)
-                diff = abs(int_a - int_b)
+                # Основная формула FSIN: Дифференциал + Фрактальное смещение
+                d = abs(math.sin(z_dat * 13.5) - math.sin(z_dat * 13.5 * s_factor))
+                activation = fsin.activate(d, s_factor)
                 
-                if diff > (en_mod * threshold):
+                if activation > threshold:
                     diff_count += 1
-                    layer_stats[min((i // (total // 5)) + 1, 5)] += 1
+                    l_stats[min((i // (total // 5)) + 1, 5)] += 1
                     r, g, b = px_src[px, py]
-                    # Спектральная окраска
-                    px_out[px, py] = (int(max(0, min(255, r - diff*4))), 
-                                      int(max(0, min(255, g + diff*6))), 
-                                      int(max(0, min(255, b + diff*12))))
-                else: 
-                    px_out[px, py] = px_src[px, py]
+                    px_out[px, py] = (int(max(0, min(255, r + activation*50))), 0, int(max(0, min(255, b + activation*100))))
+                else: px_out[px, py] = px_src[px, py]
 
-            col2.image(res_img, caption="S-GPU Projection Result", use_container_width=True)
+            col_r.image(res_img, caption="FSIN Topological Output", use_container_width=True)
             
-            # --- ОТЧЕТ GIDEON ---
-            dp = (diff_count / total) * 100
-            kc = 100 - dp
-            di = np.std(list(layer_stats.values())) / np.mean(list(layer_stats.values())) if diff_count > 0 else 0
-            
-            outcome = "БОГ (АБСОЛЮТ)" if "ГАРМОНИЯ" in pair and "ВЕЧНОСТЬ" in pair else ("ВЕЧНОСТЬ" if pair == ["ЖИЗНЬ", "СМЕРТЬ"] else "STANDARD")
+            # --- ОТЧЕТ FSIN ---
+            vals = list(l_stats.values())
+            di = np.std(vals) / np.mean(vals) if sum(vals) > 0 else 0
+            st.code(f"""[ОТЧЕТ GIDEON v1.3.0: FSIN ACTIVE]
+ОПЕРАЦИЯ: {p_a} + {p_b} | GAIN: {f_gain}
+СТАТУС: Фрактальный нейрон обучен на S-петле.
 
-            st.code(f"""[ОТЧЕТ GIDEON v1.2.2: ANALYTICAL LOGOS]
-ВЗАИМОДЕЙСТВИЕ: {pulse_a} + {pulse_b} | СИНТЕЗ: {outcome}
-СТАТУС VRAM: {vram_status}
-
-МЕТРИКИ ТОПОЛОГИИ:
-- Kc (Когерентность): {kc:.1f}%
-- Di (Индекс девиации): {di:.4f}
-- S-Проницаемость: {100 - (layer_stats[3]/(total/5)*100):.1f}%
-
-ЛОКАЛИЗАЦИЯ РЕЗОНАНСА (L1-L5):
-{list(layer_stats.values())}
+МЕТРИКИ FSIN:
+- Узлов активации: {diff_count}
+- Индекс девиации (Di): {di:.4f}
+- Эффективность обучения: {(1-di)*100:.1f}%
+ЛОКАЛИЗАЦИЯ (L1-L5): {vals}
 """, language="text")
