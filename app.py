@@ -7,36 +7,59 @@ from PIL import Image
 st.set_page_config(page_title="GIDEON | Mirror Mode", layout="wide")
 st.title("S-GPU GIDEON: Дифференциальный анализ (Mirror)")
 
-VRAM_FILE = 'matrix.json'
-CORE_FILE = 'Core-13.json'
+# Определение абсолютного пути к директории скрипта
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+VRAM_FILE = os.path.join(BASE_DIR, 'matrix.json')
+CORE_FILE = os.path.join(BASE_DIR, 'Core-13.json')
 
 @st.cache_data
 def load_json_data(file_path):
-    if not os.path.exists(file_path): return None
+    """Загрузка данных с проверкой существования и логированием"""
+    if not os.path.exists(file_path):
+        return None
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            return data.get('nodes', data.get('dipoles', [])) if isinstance(data, dict) else data
-    except: return None
+            if isinstance(data, dict):
+                return data.get('nodes', data.get('dipoles', []))
+            return data
+    except Exception as e:
+        st.error(f"Ошибка парсинга {os.path.basename(file_path)}: {e}")
+        return None
 
-nodes, core_dipoles = load_json_data(VRAM_FILE), load_json_data(CORE_FILE)
+# Инициализация компонентов
+nodes = load_json_data(VRAM_FILE)
+core_dipoles = load_json_data(CORE_FILE)
 
+# Блок диагностики при отсутствии VRAM
 if nodes is None:
-    st.error("Критическая ошибка: VRAM не обнаружена.")
-    st.stop()
+    st.error(f"Критическая ошибка: Файл '{os.path.basename(VRAM_FILE)}' не найден по пути {VRAM_FILE}")
+    st.info(f"Файлы в директории: {os.listdir(BASE_DIR)}")
+    uploaded_vram = st.file_uploader("Загрузите 'matrix.json' вручную", type=["json"])
+    if uploaded_vram:
+        data = json.load(uploaded_vram)
+        nodes = data.get('nodes', data) if isinstance(data, dict) else data
+    else:
+        st.stop()
+
+if core_dipoles is None:
+    st.sidebar.warning("Core-13.json не активирован. Эмуляция ядра.")
+else:
+    st.sidebar.success(f"Процессор Core-13 активен: {len(core_dipoles)} диполей")
+
+st.success(f"VRAM активна: {len(nodes)} узлов.")
 
 # Интерфейс управления
 st.sidebar.header("Параметры ядра")
 base_energy = st.sidebar.slider("Базовая Энергия", 0.0, 25.0, 18.0)
 base_phase = st.sidebar.slider("Базовая Фаза", 0.0, 40.0, 13.5)
-threshold = st.sidebar.slider("Порог сепарации", 0.1, 0.98, 0.5)
+threshold = st.sidebar.slider("Порог сепарации", 0.1, 0.98, 0.3)
 
 st.subheader("Дифференциальный ввод (Зеркало)")
 col_a, col_b = st.columns(2)
-pulse_a = col_a.text_input("Импульс А (Основа)", "СФИРАЛЬ")
-pulse_b = col_b.text_input("Импульс Б (Сравнение)", "ТРИНГЛ")
+pulse_a = col_a.text_input("Импульс А (Основа)", "ЖИЗНЬ")
+pulse_b = col_b.text_input("Импульс Б (Сравнение)", "СМЕРТЬ")
 
-# Расчет векторов
 def get_params(text, b_e, b_p):
     vector = sum(ord(c) for c in text) * 0.001 if text else 0.0
     return b_e + (len(text) * 0.2), b_p + (vector * 1.5)
@@ -63,7 +86,8 @@ if image_file is not None:
             
             for i in range(total_nodes):
                 c_idx, r_idx = i % side, i // side
-                px, py = max(0, min(1023, int((c_idx/side)*1023))), max(0, min(1023, int((r_idx/rows)*1023)))
+                px = max(0, min(1023, int((c_idx/side)*1023)))
+                py = max(0, min(1023, int((r_idx/rows)*1023)))
                 
                 z = nodes[i].get('z', 0.0) if isinstance(nodes[i], dict) else 0.0
                 
@@ -71,7 +95,7 @@ if image_file is not None:
                 int_a = e_a * math.sin(z * p_a)
                 int_b = e_b * math.sin(z * p_b)
                 
-                # Дифференциальный сигнал
+                # Дифференциальный сигнал (Зеркало)
                 diff_signal = abs(int_a - int_b)
                 
                 if diff_signal > (base_energy * threshold):
@@ -79,7 +103,7 @@ if image_file is not None:
                     layer_diff[min((i // (total_nodes // 5)) + 1, 5)] += 1
                     
                     r, g, b = rgb_map[px, py]
-                    # Окраска разности в неоновый бирюзовый (сдвиг в холодный спектр)
+                    # Окраска разности (смещение в холодный неоновый спектр)
                     new_r = int(max(0, min(255, r - diff_signal * 5)))
                     new_g = int(max(0, min(255, g + diff_signal * 10)))
                     new_b = int(max(0, min(255, b + diff_signal * 15)))
@@ -91,12 +115,16 @@ if image_file is not None:
                         if px+dx < 1024 and py+dy < 1024:
                             output_pixels[px+dx, py+dy] = (new_r, new_g, new_b)
             
-            st.image(output_img, caption=f"Разница: '{pulse_a}' vs '{pulse_b}'", use_container_width=True)
+            st.image(output_img, caption=f"Дифференциальный отпечаток: {pulse_a} vs {pulse_b}", use_container_width=True)
             
             st.code(f"""[ОТЧЕТ GIDEON: MIRROR MODE]
 Сравнение: {pulse_a} / {pulse_b}
 Уникальных узлов разности: {diff_count} ({(diff_count/total_nodes)*100:.1f}%)
 
-ЛОКАЛИЗАЦИЯ РАЗЛИЧИЙ ПО СЛОЯМ:
-L1: {layer_diff[1]} | L2: {layer_diff[2]} | L3: {layer_diff[3]} | L4: {layer_diff[4]} | L5: {layer_diff[5]}
+ЛОКАЛИЗАЦИЯ РАЗЛИЧИЙ ПО СЛОЯМ ВЛОЖЕННОСТИ:
+L1 (Поверхность): {layer_diff[1]}
+L2 (Транзит):    {layer_diff[2]}
+L3 (Медиана):    {layer_diff[3]}
+L4 (Глубина):    {layer_diff[4]}
+L5 (Ядро VRAM):  {layer_diff[5]}
 """, language="text")
