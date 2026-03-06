@@ -19,13 +19,17 @@ def load_nodes(uploaded_file):
         st.error(f"Ошибка десериализации данных: {e}")
         return []
 
+# Блок управления резонансом (Ядро)
+st.sidebar.header("Параметры резонанса")
+energy = st.sidebar.slider("Энергия (Energy)", min_value=0.0, max_value=5.0, value=1.0, step=0.1)
+phase = st.sidebar.slider("Фаза (Phase)", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
+
 # Блок 1: Инициализация архитектуры
 st.subheader("1. Загрузка памяти (VRAM)")
 matrix_file = st.file_uploader("Загрузите JSON-массив (файл 18 МБ)", type=["json"])
 
 nodes = load_nodes(matrix_file)
 
-# Блокировка интерфейса до загрузки матрицы
 if not nodes:
     st.warning("Ожидание загрузки топологической матрицы.")
     st.stop()
@@ -43,19 +47,16 @@ if image_file is not None:
     col1.image(orig_img, caption="Исходные данные", use_container_width=True)
     
     if st.button("Инициировать топологический перенос"):
-        with st.spinner("Синхронизация узлов..."):
-            # Создание виртуального буфера
+        with st.spinner("Синхронизация узлов и расчет интерференции..."):
             output_img = Image.new('RGB', (1024, 1024), (0, 0, 0))
             output_pixels = output_img.load()
             
-            # Масштабирование
             resized_orig = orig_img.resize((1024, 1024))
             rgb_map = resized_orig.load()
             
             total = len(nodes)
             side = int(math.sqrt(total))
             
-            # Топологический перенос
             for i in range(total):
                 col, row = i % side, i // side
                 
@@ -66,8 +67,23 @@ if image_file is not None:
                 safe_y = max(0, min(py, 1023))
                 
                 try:
-                    output_pixels[safe_x, safe_y] = rgb_map[safe_x, safe_y]
+                    # Извлечение данных конкретного узла
+                    node = nodes[i]
+                    z_coord = node.get('z', 0.0) if isinstance(node, dict) else 0.0
+                    
+                    # Расчет резонанса
+                    interference = energy * math.sin(z_coord * phase)
+                    
+                    # Захват исходного цвета
+                    r, g, b = rgb_map[safe_x, safe_y]
+                    
+                    # Применение интерференции (смещение в фиолетовый спектр по амплитуде Z)
+                    new_r = int(max(0, min(255, r + interference * 50)))
+                    new_g = int(max(0, min(255, g + interference * 20)))
+                    new_b = int(max(0, min(255, b + interference * 50)))
+                    
+                    output_pixels[safe_x, safe_y] = (new_r, new_g, new_b)
                 except Exception:
                     continue
             
-            col2.image(output_img, caption="Графический отпечаток состояния памяти", use_container_width=True)
+            col2.image(output_img, caption="Отпечаток резонанса", use_container_width=True)
