@@ -8,18 +8,13 @@ from PIL import Image
 st.set_page_config(page_title="S-GPU GIDEON", layout="wide")
 st.title("Топологический процессор S-GPU GIDEON")
 
-# Динамический поиск файла топологической матрицы
-PATH_OPTIONS = [
-    'architecture/кольцо 5 порядков вложенности.json',
-    'кольцо 5 порядков вложенности.json'
-]
-
-RAM_FILE = next((path for path in PATH_OPTIONS if os.path.exists(path)), None)
+# Прямой путь к файлу без кириллицы и пробелов
+RAM_FILE = 'matrix.json'
 
 @st.cache_data
 def load_nodes(filepath):
     """Кэшированная загрузка топологических узлов"""
-    if not filepath:
+    if not filepath or not os.path.exists(filepath):
         return []
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -34,7 +29,7 @@ nodes = load_nodes(RAM_FILE)
 
 # Блокировка при отсутствии данных
 if not nodes:
-    st.error("Критическая ошибка: Файл матрицы не найден ни в корне, ни в папке /architecture.")
+    st.error(f"Критическая ошибка: Файл '{RAM_FILE}' не найден. Убедитесь, что он загружен в корень репозитория GitHub.")
     st.stop()
 
 st.success(f"Топологическая матрица активна: {len(nodes)} узлов.")
