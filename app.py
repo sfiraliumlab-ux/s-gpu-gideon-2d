@@ -5,80 +5,77 @@ import os
 import glob
 from PIL import Image
 
-st.set_page_config(page_title="S-GPU GIDEON | Deep Layer Analysis", layout="wide")
+st.set_page_config(page_title="S-GPU GIDEON | Core-13 Debug", layout="wide")
 st.title("Топологический процессор S-GPU GIDEON")
 
-# --- СЛУЖЕБНЫЙ БЛОК: ПОИСК ФАЙЛОВ ---
-def find_and_load_json(filename, label):
-    """Ищет файл по всему репозиторию и загружает его"""
-    # 1. Прямой поиск в корне
-    path = filename
-    if not os.path.exists(path):
-        # 2. Рекурсивный поиск во всех подпапках
-        matches = glob.glob(f"**/{filename}", recursive=True)
-        if matches:
-            path = matches[0]
-        else:
-            return None, None
+# --- СЛУЖЕБНЫЙ БЛОК: УМНЫЙ ПОИСК ---
+def diagnostic_load(filename):
+    """Ищет файл и возвращает (данные, путь, ошибка)"""
+    # 1. Поиск во всех подпапках
+    matches = glob.glob(f"**/{filename}", recursive=True)
+    path = matches[0] if matches else None
+    
+    if not path and os.path.exists(filename):
+        path = filename
 
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            # Извлекаем список узлов или диполей
-            nodes = data.get('nodes', data.get('dipoles', [])) if isinstance(data, dict) else data
-            return nodes, path
-    except Exception as e:
-        st.error(f"Ошибка при чтении {label} ({path}): {e}")
-        return None, None
-
-# --- ЗАГРУЗКА ДАННЫХ ---
-nodes, vram_path = find_and_load_json('matrix.json', "VRAM")
-core_dipoles, core_path = find_and_load_json('Core-13.json', "Core")
-
-# Если автозагрузка VRAM не удалась — требуем ручной ввод
-if nodes is None:
-    st.error("Критическая ошибка: 'matrix.json' не найден в репозитории.")
-    st.info(f"Текущие файлы в проекте: {os.listdir('.')}")
-    uploaded_vram = st.file_uploader("Загрузите 'matrix.json' вручную", type=["json"])
-    if uploaded_vram:
+    if path:
         try:
-            data = json.load(uploaded_vram)
-            nodes = data.get('nodes', data) if isinstance(data, dict) else data
-        except:
-            st.stop()
-    else:
-        st.stop()
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                content = data.get('nodes', data.get('dipoles', data)) if isinstance(data, dict) else data
+                return content, path, None
+        except Exception as e:
+            return None, path, str(e)
+    return None, None, "Файл не найден"
 
-# Индикация статуса в боковой панели
-if core_dipoles:
-    st.sidebar.success(f"Процессор активен: {len(core_dipoles)} диполей")
+# --- ЗАГРУЗКА КОМПОНЕНТОВ ---
+nodes, vram_path, vram_err = diagnostic_load('matrix.json')
+core_dipoles, core_path, core_err = diagnostic_load('Core-13.json')
+
+# Интерфейс ручной дозагрузки при сбое
+if nodes is None:
+    st.error(f"Память VRAM ('matrix.json') не обнаружена.")
+    st.info(f"Файлы в корне сервера: {os.listdir('.')}")
+    u_vram = st.file_uploader("Загрузить matrix.json вручную", type=["json"])
+    if u_vram:
+        data = json.load(u_vram)
+        nodes = data.get('nodes', data) if isinstance(data, dict) else data
+    else: st.stop()
+
+if core_dipoles is None:
+    st.sidebar.warning("⚠️ Ядро Core-13.json не найдено. Ожидание загрузки...")
+    u_core = st.sidebar.file_uploader("Загрузить Core-13.json", type=["json"])
+    if u_core:
+        data = json.load(u_core)
+        core_dipoles = data.get('dipoles', data) if isinstance(data, dict) else data
+        st.sidebar.success("Ядро загружено вручную")
 else:
-    st.sidebar.warning("Core-13.json не найден. Эмуляция ядра.")
+    st.sidebar.success(f"Процессор Core-13 активен ({len(core_dipoles)} диполей)")
 
-st.success(f"VRAM активна: {len(nodes)} узлов. (Путь: {vram_path or 'ручной'})")
+st.success(f"Система готова. VRAM: {len(nodes)} узлов.")
 
-# --- ИНТЕРФЕЙС УПРАВЛЕНИЯ ---
-st.sidebar.header("Ядро GIDEON (Core-13)")
-base_energy = st.sidebar.slider("Базовая Энергия", 0.0, 25.0, 18.0)
+# --- ПАНЕЛЬ УПРАВЛЕНИЯ ---
+st.sidebar.header("Параметры резонанса")
+base_energy = st.sidebar.slider("Базовая Энергия", 0.0, 25.0, 19.4)
 base_phase = st.sidebar.slider("Базовая Фаза", 0.0, 40.0, 13.5)
 threshold = st.sidebar.slider("Порог отсечения (Gate)", 0.5, 0.98, 0.95)
 
 st.subheader("Центральный процессор: Ввод данных")
 user_input = st.text_input("Введите информационный импульс", "ГЕОМЕТРИЯ ПУСТОТЫ")
 
-# Динамическая модуляция текстом
+# Динамическая модуляция
 text_vector = sum(ord(c) for c in user_input) * 0.001 if user_input else 0.0
 dynamic_phase = base_phase + (text_vector * 1.5)
 dynamic_energy = base_energy + (len(user_input) * 0.2 if user_input else 0.0)
 
-image_file = st.file_uploader("Загрузите растровое изображение", type=["jpg", "jpeg", "png"])
+image_file = st.file_uploader("Загрузите растровый источник", type=["jpg", "jpeg", "png"])
 
 if image_file is not None:
     col1, col2 = st.columns(2)
     orig_img = Image.open(image_file).convert('RGB')
     col1.image(orig_img, caption="Входной сигнал", use_container_width=True)
     
-    if st.button("Инициировать глубокий резонанс"):
+    if st.button("Запустить глубокий резонанс"):
         with st.spinner("Анализ прохождения через слои L1-L5..."):
             canvas_size = 1024
             output_img = Image.new('RGB', (canvas_size, canvas_size), (0, 0, 0))
@@ -94,25 +91,19 @@ if image_file is not None:
             nodes_per_layer = total_nodes // 5
             
             for i in range(total_nodes):
-                # Координаты сетки
                 c_idx, r_idx = i % side, i // side
                 px = max(0, min(1023, int((c_idx / side) * 1023)))
                 py = max(0, min(1023, int((r_idx / rows) * 1023)))
 
-                # Слой вложенности
                 current_layer = min((i // nodes_per_layer) + 1, 5)
+                z_coord = nodes[i].get('z', 0.0) if isinstance(nodes[i], dict) else 0.0
                 
-                # Данные узла
-                node = nodes[i]
-                z_coord = node.get('z', 0.0) if isinstance(node, dict) else 0.0
-                
-                # Интерференция
+                # Интерференция модулированная ядром
                 interference = dynamic_energy * math.sin(z_coord * dynamic_phase)
                 
                 if interference > (dynamic_energy * threshold):
                     purple_shifts += 1
                     layer_stats[current_layer] += 1
-                    
                     r, g, b = rgb_map[px, py]
                     new_r = int(max(0, min(255, r + interference * 12)))
                     new_g = int(max(0, min(255, g - interference * 5)))
@@ -120,15 +111,14 @@ if image_file is not None:
                 else:
                     new_r, new_g, new_b = rgb_map[px, py]
                 
-                # Рисуем блок 2x2
                 for dx in range(2):
                     for dy in range(2):
                         if px+dx < 1024 and py+dy < 1024:
                             output_pixels[px+dx, py+dy] = (new_r, new_g, new_b)
             
-            col2.image(output_img, caption=f"Резонанс: {user_input}", use_container_width=True)
+            col2.image(output_img, caption=f"Резонанс Core-13: {user_input}", use_container_width=True)
             
-            # Финальный отчет
+            # Послойный отчет
             res_percent = (purple_shifts / total_nodes) * 100
             st.code(f"""[ОТЧЕТ GIDEON: LAYER ANALYSIS]
 Импульс: '{user_input}' | Фаза: {dynamic_phase:.4f}
