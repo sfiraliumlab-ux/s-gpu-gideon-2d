@@ -19,10 +19,11 @@ def load_nodes(uploaded_file):
         st.error(f"Ошибка десериализации данных: {e}")
         return []
 
-# Блок управления резонансом (Ядро)
+# Блок управления резонансом и рендерингом
 st.sidebar.header("Параметры резонанса")
-energy = st.sidebar.slider("Энергия (Energy)", min_value=0.0, max_value=5.0, value=1.0, step=0.1)
+energy = st.sidebar.slider("Энергия (Energy)", min_value=0.0, max_value=20.0, value=5.0, step=0.5)
 phase = st.sidebar.slider("Фаза (Phase)", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
+brush_size = st.sidebar.slider("Размер узла (сглаживание)", min_value=1, max_value=4, value=2, step=1)
 
 # Блок 1: Инициализация архитектуры
 st.subheader("1. Загрузка памяти (VRAM)")
@@ -60,6 +61,7 @@ if image_file is not None:
             for i in range(total):
                 col, row = i % side, i // side
                 
+                # Базовые координаты проекции
                 px = int((col / side) * 1023)
                 py = int((row / side) * 1023)
                 
@@ -78,11 +80,18 @@ if image_file is not None:
                     r, g, b = rgb_map[safe_x, safe_y]
                     
                     # Применение интерференции (смещение в фиолетовый спектр по амплитуде Z)
-                    new_r = int(max(0, min(255, r + interference * 50)))
-                    new_g = int(max(0, min(255, g + interference * 20)))
-                    new_b = int(max(0, min(255, b + interference * 50)))
+                    new_r = int(max(0, min(255, r + interference * 5)))
+                    new_g = int(max(0, min(255, g + interference * 2)))
+                    new_b = int(max(0, min(255, b + interference * 5)))
                     
-                    output_pixels[safe_x, safe_y] = (new_r, new_g, new_b)
+                    # Отрисовка узла с учетом сглаживания
+                    for dx in range(brush_size):
+                        for dy in range(brush_size):
+                            nx = safe_x + dx
+                            ny = safe_y + dy
+                            if nx < 1024 and ny < 1024:
+                                output_pixels[nx, ny] = (new_r, new_g, new_b)
+                                
                 except Exception:
                     continue
             
