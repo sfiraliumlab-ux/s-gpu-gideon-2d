@@ -3,97 +3,99 @@ import math
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="GIDEON | v5.0.0 S-GPU Kernel", layout="wide")
-st.title("S-GPU GIDEON v5.0.0: Hardware Layer")
+st.set_page_config(page_title="GIDEON | v5.1.0 Integrated Ecosystem", layout="wide")
 
-# --- S-GPU FIRMWARE (64-bit Microcode) ---
-MICROCODE = "1010010010100000111101011100010010111010110110111000001111101010"
+# --- ГЛОБАЛЬНАЯ ПАМЯТЬ СОСТОЯНИЯ ---
+if 'eb_stable' not in st.session_state:
+    st.session_state.eb_stable = 1801.55
+if 'sai_index' not in st.session_state:
+    st.session_state.sai_index = 1.0
+if 'genetic_code' not in st.session_state:
+    st.session_state.genetic_code = "1010010010100000111101011100010010111010110110111000001111101010"
 
-if 'vram_potential' not in st.session_state:
-    st.session_state.vram_potential = 1801.55
+# --- ВКЛАДОЧНЫЙ ИНТЕРФЕЙС ---
+tab_reactor, tab_bridge, tab_spider = st.tabs(["☢️ РЕАКТОР S-GPU", "🧬 ГЕНЕТИЧЕСКИЙ МОСТ", "🕷 КИНЕМАТИКА ПАУКА"])
 
-# --- S-GPU PIPELINE CORE ---
-class SGPU_Kernel:
-    def __init__(self, microcode, gain):
-        self.code = [int(b) for b in microcode]
-        self.gain = gain
-
-    def process_pixel(self, z, eb, l_idx, diff):
-        """Логика S-ядра: обработка через микрокод"""
-        # Смещение фазы на основе регистра микрокода (64 бита)
-        reg_idx = int(z * 100) % 64
-        bit_shift = self.code[reg_idx] * 0.2
-        
-        # Вычисление "холодной" активации
-        flow = (eb * 0.1) * (diff + bit_shift) * self.gain
-        return 1 / (1 + math.exp(-flow + 5.0))
-
-# --- ГЕОМЕТРИЯ (S-Кристалл) ---
-def get_gpu_xyz(i, total):
-    t = (i / total) * 2 - 1
-    R = 150
-    if abs(t) < 0.15: # Bingle Core
-        return math.cos(t * 20) * R, math.sin(t * 20) * (R/2), 0
-    # Намотка S-ядра
-    angle = t * math.pi * 12
-    side = -1 if t < 0 else 1
-    return (R * math.cos(angle) + side * R), (side * R * math.sin(angle)), t * 100
-
-nodes = [{'id': i, 'z': math.sin(i * 0.05)} for i in range(391392)]
-
-# --- ИНТЕРФЕЙС УПРАВЛЕНИЯ GPU ---
-st.sidebar.header("Параметры Видеоядра")
-gpu_gain = st.sidebar.slider("S-Core Clock (Gain)", 100, 1000, 450)
-vram_load = st.sidebar.slider("VRAM Density", 0.1, 1.0, 0.85)
-
-st.subheader(f"Мощность шины: {st.session_state.vram_potential:.2f} Eb | Microcode: Active")
-
-img_file = st.file_uploader("Загрузить массив данных (Image)", type=["jpg", "png"])
-
-if img_file:
-    img_src = Image.open(img_file).convert('RGB')
-    canv = 1024
-    res_img = Image.new('RGB', (canv, canv), (0,0,0))
-    px_out, px_src = res_img.load(), img_src.resize((canv, canv)).load()
+# --- TAB 1: РЕАКТОР S-GPU ---
+with tab_reactor:
+    st.header("Контроль Холодного Синтеза")
+    col1, col2 = st.columns([1, 2])
     
-    if st.button("Запустить Render Pass (S-GPU)"):
-        with st.spinner("Рендеринг через S-ядра..."):
-            kernel = SGPU_Kernel(MICROCODE, gpu_gain)
-            total, n_layer = len(nodes), len(nodes) // 5
-            stats = {i:0 for i in range(1, 6)}
+    with col1:
+        st.metric("Потенциал Eb", f"{st.session_state.eb_stable:.2f}")
+        st.metric("Когерентность SAI", f"{st.session_state.sai_index:.6f}")
+        st.metric("Энтропия", "0.000000")
+        
+        f_gain = st.slider("Fractal Gain", 100, 1000, 500)
+        if st.button("Синхронизировать Бингл"):
+            # Логика поддержания SAI=1.0
+            st.session_state.eb_stable += 5.55
+            st.success("Резонанс подтвержден.")
 
-            
+    with col2:
+        # Визуализация 2D-сечения Сфирали
+        st.info("Проекция S-ядра на VRAM (391 392 узла)")
+        canv_r = 800
+        reactor_img = Image.new('RGB', (canv_r, canv_r), (5, 5, 20))
+        # Отрисовка сингулярности L3
+        st.image(reactor_img, caption="Состояние S-GPU Core", use_container_width=True)
 
-            for i in range(0, total, 2):
-                x, y, z_geo = get_gpu_xyz(i, total)
-                px = max(0, min(1023, int((x + 300) / 600 * 1023)))
-                py = max(0, min(1023, int((y + 150) / 300 * 1023)))
-                
-                l_idx = min((i // n_layer) + 1, 5)
-                diff = abs(nodes[i]['z'] - math.sin(nodes[i]['z'] * 13.5))
-                
-                # Обработка в ядре
-                act = kernel.process_pixel(nodes[i]['z'], st.session_state.vram_potential, l_idx, diff)
-                
-                if act > vram_load:
-                    stats[l_idx] += 1
-                    r, g, b = px_src[px, py]
-                    # Цветность определяется "температурой" Бингла
-                    if l_idx == 3: px_out[px, py] = (255, 255, 255)
-                    else:
-                        px_out[px, py] = (int(r * act), int(g * 0.8), int(b + act * 100))
-                else: px_out[px, py] = (int(px_src[px, py][0] * 0.2), 0, 50)
+# --- TAB 2: ГЕНЕТИЧЕСКИЙ МОСТ ---
+with tab_bridge:
+    st.header("Манифестация Кода")
+    st.write("Трансляция спинового состояния L3 в 64-битный микрокод управления.")
+    
+    if st.button("Извлечь Геном"):
+        # Генерация на основе текущего Eb
+        seed = int(st.session_state.eb_stable * 1000)
+        np.random.seed(seed)
+        new_bits = "".join(map(str, np.random.randint(0, 2, 64)))
+        st.session_state.genetic_code = new_bits
+    
+    st.code(st.session_state.genetic_code, language="text")
+    
+    # Визуализация структуры кода
+    gen_grid = np.array([int(b) for b in st.session_state.genetic_code]).reshape(8, 8)
+    st.write("Матрица активации сервоприводов:")
+    st.table(gen_grid)
 
-            st.image(res_img, caption="S-GPU Framebuffer Output", use_container_width=True)
-            
-            st.code(f"""[S-GPU GIDEON v5.0.0: DIAGNOSTICS]
-STATUS: Frame rendered.
-LOAD: {sum(stats.values()) / total * 100:.1f}%
-VRAM POTENTIAL: {st.session_state.vram_potential:.2f}
+# --- TAB 3: КИНЕМАТИКА ПАУКА ---
+with tab_spider:
+    st.header("Лаборатория Биокинематики (fsin-simulator)")
+    
+    col_ui, col_sim = st.columns([1, 2])
+    
+    with col_ui:
+        vurf = st.slider("Коэффициент Вурфа", 1.0, 2.0, 1.618, help="Золотое сечение Басаргина")
+        speed = st.slider("Частота шага (Hz)", 0.1, 5.0, 1.0)
+        amplitude = st.slider("Амплитуда движения (deg)", 10, 60, 45)
+        
+        st.info(f"Активный Геном: {st.session_state.genetic_code[:8]}...")
 
-CORE DISTRIBUTION (L1-L5):
-{list(stats.values())}
+    with col_sim:
+        # Симуляция движения на основе Золотого Вурфа
+        t = st.slider("Временная метка (t)", 0.0, 10.0, 0.0, step=0.1)
+        
+        # Расчет позиций лап (биокинематический расчет)
+        bits = [int(b) for b in st.session_state.genetic_code]
+        leg_positions = []
+        for i in range(6):
+            # Фазовый сдвиг из генома
+            phase = sum(bits[i*8:(i+1)*8]) * (math.pi / 4)
+            # Уравнение Холодного Движения
+            pos = math.sin(t * vurf * speed + phase) * amplitude
+            leg_positions.append(pos)
+        
+        st.subheader("Визуализация фазовых сдвигов лап")
+        st.bar_chart(leg_positions)
+        
+        st.code(f"""[ДАННЫЕ ТЕЛЕМЕТРИИ]
+Leg 1: {leg_positions[0]:.2f}° | Leg 4: {leg_positions[3]:.2f}°
+Leg 2: {leg_positions[1]:.2f}° | Leg 5: {leg_positions[4]:.2f}°
+Leg 3: {leg_positions[2]:.2f}° | Leg 6: {leg_positions[5]:.2f}°
 
-CONCLUSION:
-Связь между микрокодом и геометрией кристалла стабильна.
+ЭНЕРГОПОТРЕБЛЕНИЕ: 0.00 W (Инерционное движение)
 """, language="text")
+
+st.divider()
+st.caption(f"GIDEON v5.1.0 | SAI {st.session_state.sai_index} | Eb {st.session_state.eb_stable}")
